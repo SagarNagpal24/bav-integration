@@ -20,7 +20,7 @@ type StoreProps = {
   onDeleteItem?: (code: string) => Promise<void>;
 };
 
-const TYPE_OPTIONS = ["Book", "Audio", "Photo"];
+const TYPE_OPTIONS = ["Book", "Audio", "Photo","Calendar"];
 
 export default function Store({
   items = [],

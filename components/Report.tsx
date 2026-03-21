@@ -1,47 +1,71 @@
-import React, { useState, useEffect, useRef } from "react";
+
+
+
+"use client";
+
+import React, { useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
-const API =
-  (typeof import.meta !== "undefined" &&
-    import.meta.env &&
-    import.meta.env.VITE_API_URL) ||
-  process.env.REACT_APP_API_URL ||
-  "http://localhost:4000";
+type BillItem = {
+  Code?: string;
+  MMScode?: string;
+  Title?: string;
+  Type?: string;
+  qty?: number;
+  Saleprice?: number;
+};
 
-function Report({ onSalesChanged }) {
-  const [bills, setBills] = useState([]);
-  const fileInputRef = useRef(null);
+type Bill = {
+  _id?: string;
+  date?: string;
+  items?: BillItem[];
+  total?: number;
+};
+
+type DeleteItemState = {
+  billIndex: number;
+  itemIndex: number;
+} | null;
+
+type PendingQtyState = {
+  billIndex: number;
+  itemIndex: number;
+  current: number;
+  next: number;
+} | null;
+
+type ReportProps = {
+  onSalesChanged?: () => void;
+};
+
+export default function Report({ onSalesChanged }: ReportProps) {
+  const [bills, setBills] = useState<Bill[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const today = new Date().toISOString().split("T")[0];
   const [selectedDate, setSelectedDate] = useState(today);
 
-  // Search (shown above Total Sales)
   const [search, setSearch] = useState("");
-
-  // Range-clear modal state
   const [showRangeConfirm, setShowRangeConfirm] = useState(false);
   const [rangeStart, setRangeStart] = useState(today);
   const [rangeEnd, setRangeEnd] = useState(today);
   const [rangeError, setRangeError] = useState("");
 
-  // Export range state (independent from clear range)
   const [exportStart, setExportStart] = useState(today);
   const [exportEnd, setExportEnd] = useState(today);
 
-  // Delete dialogs
-  const [deleteIndex, setDeleteIndex] = useState(null);
-  const [deleteItem, setDeleteItem] = useState(null);
+  const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
+  const [deleteItem, setDeleteItem] = useState<DeleteItemState>(null);
+  const [pendingQty, setPendingQty] = useState<PendingQtyState>(null);
 
-  // Qty change confirmation
-  // shape: { billIndex, itemIndex, current, next }
-  const [pendingQty, setPendingQty] = useState(null);
-
-  // Toast message
   const [alertMsg, setAlertMsg] = useState("");
 
-  // Helper: inclusive range check
-  const inInclusiveRange = (dateStr, startStr, endStr) => {
-    if (!dateStr) return false;
+  const inInclusiveRange = (
+    dateStr?: string,
+    startStr?: string,
+    endStr?: string
+  ) => {
+    if (!dateStr || !startStr || !endStr) return false;
     const d = new Date(dateStr);
     const s = new Date(startStr);
     const e = new Date(endStr);
@@ -51,41 +75,40 @@ function Report({ onSalesChanged }) {
     return d >= s && d <= e;
   };
 
-  // Load bills from API based on selectedDate
   useEffect(() => {
     const load = async () => {
       try {
         const url = selectedDate
-          ? `${API}/api/bills?date=${encodeURIComponent(selectedDate)}`
-          : `${API}/api/bills`;
-        const res = await fetch(url);
+          ? `/api/bills?date=${encodeURIComponent(selectedDate)}`
+          : `/api/bills`;
+
+        const res = await fetch(url, { credentials: "include" });
         const data = await res.json();
         setBills(Array.isArray(data) ? data : []);
       } catch {
         setAlertMsg("❌ Failed to load bills from server");
       }
     };
+
     load();
   }, [selectedDate]);
 
-  // Auto-hide toast
   useEffect(() => {
     if (!alertMsg) return;
     const t = setTimeout(() => setAlertMsg(""), 2800);
     return () => clearTimeout(t);
   }, [alertMsg]);
 
-  // Refresh helper
   const refresh = async () => {
     const url = selectedDate
-      ? `${API}/api/bills?date=${encodeURIComponent(selectedDate)}`
-      : `${API}/api/bills`;
-    const res = await fetch(url);
+      ? `/api/bills?date=${encodeURIComponent(selectedDate)}`
+      : `/api/bills`;
+
+    const res = await fetch(url, { credentials: "include" });
     const data = await res.json();
     setBills(Array.isArray(data) ? data : []);
   };
 
-  // ---- Clear bills by RANGE ----
   const validateRange = () => {
     if (!rangeStart || !rangeEnd) {
       setRangeError("Please select both start and end dates.");
@@ -103,19 +126,23 @@ function Report({ onSalesChanged }) {
     if (!validateRange()) return;
 
     try {
-      const listUrl = `${API}/api/bills?start=${encodeURIComponent(
+      const listUrl = `/api/bills?start=${encodeURIComponent(
         rangeStart
       )}&end=${encodeURIComponent(rangeEnd)}`;
-      const listRes = await fetch(listUrl);
-      let list = [];
+
+      const listRes = await fetch(listUrl, { credentials: "include" });
+      let list: Bill[] = [];
+
       if (listRes.ok) {
         const body = await listRes.json();
         list = Array.isArray(body) ? body : [];
       } else {
-        const allRes = await fetch(`${API}/api/bills`);
+        const allRes = await fetch(`/api/bills`, { credentials: "include" });
         const all = await allRes.json();
         list = Array.isArray(all)
-          ? all.filter((b) => inInclusiveRange(b?.date, rangeStart, rangeEnd))
+          ? all.filter((b: Bill) =>
+              inInclusiveRange(b?.date, rangeStart, rangeEnd)
+            )
           : [];
       }
 
@@ -131,7 +158,12 @@ function Report({ onSalesChanged }) {
       }
 
       const results = await Promise.allSettled(
-        toDelete.map((b) => fetch(`${API}/api/bills/${b._id}`, { method: "DELETE" }))
+        toDelete.map((b) =>
+          fetch(`/api/bills/${b._id}`, {
+            method: "DELETE",
+            credentials: "include",
+          })
+        )
       );
 
       const deleted = results.filter((r) => r.status === "fulfilled").length;
@@ -139,8 +171,11 @@ function Report({ onSalesChanged }) {
 
       setShowRangeConfirm(false);
       await refresh();
+
       if (failed === 0) {
-        setAlertMsg(`✅ Deleted ${deleted} bill(s) from ${rangeStart} to ${rangeEnd}`);
+        setAlertMsg(
+          `✅ Deleted ${deleted} bill(s) from ${rangeStart} to ${rangeEnd}`
+        );
       } else {
         setAlertMsg(`⚠️ Deleted ${deleted} bill(s); ${failed} failed`);
       }
@@ -152,27 +187,31 @@ function Report({ onSalesChanged }) {
     }
   };
 
-  // ---- Bill numbering helpers ----
-  const billNoOfIndex = (idx) => bills.length - idx; // idx in FULL array
-  const idxInAll = (bill) =>
-    bills.findIndex((b) => (b?._id && bill?._id ? b._id === bill._id : b === bill));
-  const billNoOf = (bill) => {
+  const billNoOfIndex = (idx: number) => bills.length - idx;
+
+  const idxInAll = (bill: Bill) =>
+    bills.findIndex((b) =>
+      b?._id && bill?._id ? b._id === bill._id : b === bill
+    );
+
+  const billNoOf = (bill: Bill) => {
     const i = idxInAll(bill);
     return i >= 0 ? billNoOfIndex(i) : "?";
   };
 
-  // ---- Qty adjust: API helpers ----
-  const patchQty = async (billId, itemIndex, qty) => {
-    // If qty <= 0, reuse delete endpoint
+  const patchQty = async (billId: string, itemIndex: number, qty: number) => {
     if (qty <= 0) {
-      await fetch(`${API}/api/bills/${billId}/items/${itemIndex}`, { method: "PATCH" });
+      await fetch(`/api/bills/${billId}/items/${itemIndex}`, {
+        method: "PATCH",
+        credentials: "include",
+      });
       return;
     }
 
-    // Preferred endpoint (add to backend if missing)
-    const res = await fetch(`${API}/api/bills/${billId}/items/${itemIndex}/qty`, {
+    const res = await fetch(`/api/bills/${billId}/items/${itemIndex}/qty`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ qty }),
     });
 
@@ -181,10 +220,14 @@ function Report({ onSalesChanged }) {
     }
   };
 
-  // ---- Qty confirmation flow ----
-  const proposeQtyChange = (billIndex, itemIndex, nextQty) => {
+  const proposeQtyChange = (
+    billIndex: number,
+    itemIndex: number,
+    nextQty: number
+  ) => {
     const current = Number(bills[billIndex]?.items?.[itemIndex]?.qty || 0);
     if (Number(nextQty) === current) return;
+
     setPendingQty({
       billIndex,
       itemIndex,
@@ -195,8 +238,11 @@ function Report({ onSalesChanged }) {
 
   const applyQtyChange = async () => {
     if (!pendingQty) return;
+
     const { billIndex, itemIndex, next } = pendingQty;
     const bill = bills[billIndex];
+    if (!bill?._id) return;
+
     try {
       await patchQty(bill._id, itemIndex, next);
       await refresh();
@@ -214,22 +260,30 @@ function Report({ onSalesChanged }) {
     }
   };
 
-  // Public handlers now *propose* changes
-  const changeQty = (billIndex, itemIndex, delta) => {
+  const changeQty = (billIndex: number, itemIndex: number, delta: number) => {
     const current = Number(bills[billIndex]?.items?.[itemIndex]?.qty || 0);
     proposeQtyChange(billIndex, itemIndex, current + delta);
   };
 
-  const setExactQty = (billIndex, itemIndex, qtyStr) => {
+  const setExactQty = (
+    billIndex: number,
+    itemIndex: number,
+    qtyStr: string
+  ) => {
     const n = Math.max(0, Math.floor(Number(qtyStr || 0)));
     proposeQtyChange(billIndex, itemIndex, n);
   };
 
-  // ---- Delete actions ----
-  const deleteBill = async (index) => {
+  const deleteBill = async (index: number) => {
     try {
-      const id = bills[index]._id;
-      await fetch(`${API}/api/bills/${id}`, { method: "DELETE" });
+      const id = bills[index]?._id;
+      if (!id) return;
+
+      await fetch(`/api/bills/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
       setDeleteIndex(null);
       await refresh();
       setAlertMsg(`✅ Deleted Bill #${billNoOfIndex(index)}`);
@@ -239,10 +293,16 @@ function Report({ onSalesChanged }) {
     }
   };
 
-  const deleteBillItem = async (billIndex, itemIndex) => {
+  const deleteBillItem = async (billIndex: number, itemIndex: number) => {
     try {
-      const id = bills[billIndex]._id;
-      await fetch(`${API}/api/bills/${id}/items/${itemIndex}`, { method: "PATCH" });
+      const id = bills[billIndex]?._id;
+      if (!id) return;
+
+      await fetch(`/api/bills/${id}/items/${itemIndex}`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+
       setDeleteItem(null);
       await refresh();
       setAlertMsg(`✅ Deleted item from Bill #${billNoOfIndex(billIndex)}`);
@@ -252,12 +312,12 @@ function Report({ onSalesChanged }) {
     }
   };
 
-  // ---- Search filter ----
-  const matchesQuery = (bill) => {
+  const matchesQuery = (bill: Bill) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
     if (String(billNoOf(bill)).includes(q)) return true;
     if ((bill.date || "").toLowerCase().includes(q)) return true;
+
     return (bill.items || []).some((it) =>
       [it?.Code, it?.MMScode, it?.Title, it?.Type]
         .filter(Boolean)
@@ -268,38 +328,41 @@ function Report({ onSalesChanged }) {
   const filtered = bills.filter(matchesQuery);
   const totalSales = filtered.reduce((sum, b) => sum + (b.total || 0), 0);
 
-  // ---- Export to Excel (FILTERED) ----
   const exportToExcel = () => {
     if (filtered.length === 0) {
       setAlertMsg("⚠️ No data to export for the selected date/search.");
       return;
     }
-    const rows = [];
+
+    const rows: Record<string, string | number>[] = [];
+
     filtered.forEach((bill) => {
       (bill.items || []).forEach((item) => {
         rows.push({
-          BillNo: billNoOf(bill),
-          Date: bill.date,
-          Code: item.Code,
+          BillNo: String(billNoOf(bill)),
+          Date: bill.date || "",
+          Code: item.Code || "",
           MMScode: item.MMScode || "",
-          Title: item.Title,
+          Title: item.Title || "",
           Type: item.Type || "",
-          Quantity: item.qty,
-          Price: item.Saleprice,
-          Subtotal: (item.Saleprice || 0) * item.qty,
+          Quantity: Number(item.qty || 0),
+          Price: Number(item.Saleprice || 0),
+          Subtotal: Number(item.Saleprice || 0) * Number(item.qty || 0),
         });
       });
     });
+
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Report");
+
     const fileName = selectedDate
       ? `Report_${selectedDate}${search ? `_q-${search}` : ""}.xlsx`
       : `Report_All${search ? `_q-${search}` : ""}.xlsx`;
+
     XLSX.writeFile(wb, fileName);
   };
 
-  // ---- Export a DATE RANGE to Excel (GROUPED) ----
   const exportRangeToExcel = async () => {
     if (!exportStart || !exportEnd) {
       setAlertMsg("⚠️ Please select both start and end dates for export.");
@@ -311,33 +374,46 @@ function Report({ onSalesChanged }) {
     }
 
     try {
-      // Try backend range first
-      const url = `${API}/api/bills?start=${encodeURIComponent(exportStart)}&end=${encodeURIComponent(exportEnd)}`;
-      const res = await fetch(url);
+      const url = `/api/bills?start=${encodeURIComponent(
+        exportStart
+      )}&end=${encodeURIComponent(exportEnd)}`;
 
-      let list = [];
+      const res = await fetch(url, { credentials: "include" });
+
+      let list: Bill[] = [];
       if (res.ok) {
         const data = await res.json();
         list = Array.isArray(data) ? data : [];
       } else {
-        // Fallback: fetch all, then filter
-        const allRes = await fetch(`${API}/api/bills`);
+        const allRes = await fetch(`/api/bills`, { credentials: "include" });
         const all = await allRes.json();
         list = Array.isArray(all) ? all : [];
       }
 
-      // Always enforce client-side date filter
-      const withinRange = list.filter((b) => inInclusiveRange(b?.date, exportStart, exportEnd));
+      const withinRange = list.filter((b) =>
+        inInclusiveRange(b?.date, exportStart, exportEnd)
+      );
 
       if (withinRange.length === 0) {
         setAlertMsg(`⚠️ No bills found from ${exportStart} to ${exportEnd}`);
         return;
       }
 
-      const map = new Map();
+      const map = new Map<
+        string,
+        {
+          MMScode: string;
+          Code: string;
+          Title: string;
+          Type: string;
+          __sumQty: number;
+          __sumAmount: number;
+        }
+      >();
+
       withinRange.forEach((bill) => {
         (bill.items || []).forEach((it) => {
-          const key = it.Code;
+          const key = it.Code || "";
           const qty = Number(it.qty) || 0;
           const unitPrice = Number(it.Saleprice) || 0;
           const lineAmount = unitPrice * qty;
@@ -355,7 +431,6 @@ function Report({ onSalesChanged }) {
           prev.Code = it.Code || prev.Code;
           prev.Title = it.Title || prev.Title;
           prev.Type = it.Type || prev.Type;
-
           prev.__sumQty += qty;
           prev.__sumAmount += lineAmount;
 
@@ -391,7 +466,7 @@ function Report({ onSalesChanged }) {
     }
   };
 
-  const normalizeBackupBill = (bill = {}) => {
+  const normalizeBackupBill = (bill: Bill = {}) => {
     const items = Array.isArray(bill.items)
       ? bill.items.map((item) => ({
           Code: item?.Code || "",
@@ -410,15 +485,16 @@ function Report({ onSalesChanged }) {
         typeof bill?.total === "number"
           ? bill.total
           : items.reduce(
-              (sum, item) => sum + Number(item.Saleprice || 0) * Number(item.qty || 0),
+              (sum, item) =>
+                sum + Number(item.Saleprice || 0) * Number(item.qty || 0),
               0
             ),
     };
   };
 
-    const exportFullBackup = async () => {
+  const exportFullBackup = async () => {
     try {
-      const res = await fetch(`${API}/api/bills`);
+      const res = await fetch(`/api/bills`, { credentials: "include" });
       const data = await res.json();
       const allBills = Array.isArray(data) ? data : [];
 
@@ -455,7 +531,9 @@ function Report({ onSalesChanged }) {
     }
   };
 
-    const importFullBackup = async (event) => {
+  const importFullBackup = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -481,14 +559,12 @@ function Report({ onSalesChanged }) {
       for (const rawBill of backupBills) {
         try {
           const normalized = normalizeBackupBill(rawBill);
+          const payload = { ...normalized };
 
-          const payload = {
-            ...normalized,
-          };
-
-          const res = await fetch(`${API}/api/bills`, {
+          const res = await fetch(`/api/bills`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "include",
             body: JSON.stringify(payload),
           });
 
@@ -521,9 +597,9 @@ function Report({ onSalesChanged }) {
       event.target.value = "";
     }
   };
+
   return (
     <div className="container">
-      {/* Toast */}
       {alertMsg && (
         <div
           style={{
@@ -546,8 +622,9 @@ function Report({ onSalesChanged }) {
         </div>
       )}
 
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div
+        style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+      >
         <h2>Sales Report</h2>
         <button
           onClick={() => setShowRangeConfirm(true)}
@@ -557,7 +634,6 @@ function Report({ onSalesChanged }) {
         </button>
       </div>
 
-      {/* Filters row (date + export filtered) */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <div>
           <label>Select Date: </label>
@@ -569,7 +645,6 @@ function Report({ onSalesChanged }) {
           <button onClick={() => setSelectedDate("")}>Show All</button>
         </div>
 
-        {/* Export (filtered) */}
         <button
           onClick={exportToExcel}
           style={{ background: "green", color: "white", padding: "6px 12px", borderRadius: 6 }}
@@ -578,12 +653,27 @@ function Report({ onSalesChanged }) {
         </button>
       </div>
 
-      {/* Export Range controls */}
-      <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div
+        style={{
+          marginTop: 10,
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
         <strong>Export Range:</strong>
-        <input type="date" value={exportStart} onChange={(e) => setExportStart(e.target.value)} />
+        <input
+          type="date"
+          value={exportStart}
+          onChange={(e) => setExportStart(e.target.value)}
+        />
         <span>to</span>
-        <input type="date" value={exportEnd} onChange={(e) => setExportEnd(e.target.value)} />
+        <input
+          type="date"
+          value={exportEnd}
+          onChange={(e) => setExportEnd(e.target.value)}
+        />
         <button
           onClick={exportRangeToExcel}
           style={{ background: "#1976d2", color: "white", padding: "6px 12px", borderRadius: 6 }}
@@ -592,8 +682,15 @@ function Report({ onSalesChanged }) {
         </button>
       </div>
 
-      {/* Search moved here, above Total Sales */}
-      <div style={{ marginTop: 12, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div
+        style={{
+          marginTop: 12,
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
         <input
           type="text"
           placeholder="Search bill no, date, code, MMS, title, type…"
@@ -611,7 +708,6 @@ function Report({ onSalesChanged }) {
 
       <h3 style={{ marginTop: "12px" }}>Total Sales: ₹{totalSales.toFixed(2)}</h3>
 
-      {/* Bills */}
       {filtered.length === 0 ? (
         <p>No bills found for this selection/search.</p>
       ) : (
@@ -652,7 +748,7 @@ function Report({ onSalesChanged }) {
                 </button>
               </div>
 
-              <table border="1" cellPadding="5" style={{ width: "100%" }}>
+              <table border={1} cellPadding="5" style={{ width: "100%" }}>
                 <thead>
                   <tr>
                     <th>Bill No</th>
@@ -679,7 +775,14 @@ function Report({ onSalesChanged }) {
                         <td>{it.Title}</td>
                         <td>{it.Type}</td>
                         <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              justifyContent: "center",
+                            }}
+                          >
                             <button
                               onClick={() => changeQty(globalIndex, i, -1)}
                               style={{ padding: "2px 8px", borderRadius: 4 }}
@@ -690,10 +793,9 @@ function Report({ onSalesChanged }) {
                             <input
                               type="number"
                               min={0}
-                              value={it.qty}
+                              value={it.qty ?? 0}
                               onChange={(e) => {
                                 const v = e.target.value;
-                                // store but don't submit yet
                                 e.target.setAttribute("data-pending", v);
                               }}
                               onBlur={(e) => {
@@ -702,7 +804,9 @@ function Report({ onSalesChanged }) {
                               }}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
-                                  const v = e.currentTarget.getAttribute("data-pending") ?? e.currentTarget.value;
+                                  const v =
+                                    e.currentTarget.getAttribute("data-pending") ??
+                                    e.currentTarget.value;
                                   setExactQty(globalIndex, i, v);
                                 }
                               }}
@@ -738,7 +842,7 @@ function Report({ onSalesChanged }) {
                     );
                   })}
                   <tr style={{ fontWeight: "bold" }}>
-                    <td colSpan="9">Bill Total</td>
+                    <td colSpan={9}>Bill Total</td>
                     <td>₹{(bill.total || 0).toFixed(2)}</td>
                   </tr>
                 </tbody>
@@ -748,14 +852,12 @@ function Report({ onSalesChanged }) {
         })
       )}
 
-      {/* Confirm Qty Change */}
       {pendingQty && (
         <div style={overlayStyle}>
           <div style={modalStyle}>
             <h3>Confirm Quantity Change</h3>
             <p>
-              Change quantity from <b>{pendingQty.current}</b> to{" "}
-              <b>{pendingQty.next}</b>?
+              Change quantity from <b>{pendingQty.current}</b> to <b>{pendingQty.next}</b>?
             </p>
             {pendingQty.next === 0 && (
               <p style={{ color: "crimson", fontWeight: 600 }}>
@@ -774,7 +876,6 @@ function Report({ onSalesChanged }) {
         </div>
       )}
 
-      {/* Confirm Range Delete */}
       {showRangeConfirm && (
         <div style={overlayStyle}>
           <div style={modalStyle}>
@@ -811,7 +912,6 @@ function Report({ onSalesChanged }) {
         </div>
       )}
 
-      {/* Confirm Delete Bill */}
       {deleteIndex !== null && (
         <div style={overlayStyle}>
           <div style={modalStyle}>
@@ -829,7 +929,6 @@ function Report({ onSalesChanged }) {
         </div>
       )}
 
-      {/* Confirm Delete Item */}
       {deleteItem && (
         <div style={overlayStyle}>
           <div style={modalStyle}>
@@ -837,7 +936,7 @@ function Report({ onSalesChanged }) {
             <p>
               Delete Item{" "}
               <b>
-                {bills[deleteItem.billIndex].items[deleteItem.itemIndex].Title}
+                {bills[deleteItem.billIndex]?.items?.[deleteItem.itemIndex]?.Title}
               </b>{" "}
               from Bill #{billNoOfIndex(deleteItem.billIndex)}?
             </p>
@@ -858,7 +957,6 @@ function Report({ onSalesChanged }) {
         </div>
       )}
 
-      {/* Small backup controls at end of page */}
       <div
         style={{
           marginTop: 24,
@@ -913,8 +1011,7 @@ function Report({ onSalesChanged }) {
   );
 }
 
-// Styles
-const overlayStyle = {
+const overlayStyle: React.CSSProperties = {
   position: "fixed",
   top: 0,
   left: 0,
@@ -927,7 +1024,7 @@ const overlayStyle = {
   zIndex: 1000,
 };
 
-const modalStyle = {
+const modalStyle: React.CSSProperties = {
   background: "white",
   padding: "20px",
   borderRadius: "10px",
@@ -937,24 +1034,22 @@ const modalStyle = {
   boxShadow: "0 4px 10px rgba(0,0,0,0.3)",
 };
 
-const btnRow = {
+const btnRow: React.CSSProperties = {
   marginTop: "20px",
   display: "flex",
   justifyContent: "space-around",
 };
 
-const dangerBtn = {
+const dangerBtn: React.CSSProperties = {
   background: "red",
   color: "white",
   padding: "8px 14px",
   borderRadius: "5px",
 };
 
-const cancelBtn = {
+const cancelBtn: React.CSSProperties = {
   background: "gray",
   color: "white",
   padding: "8px 14px",
   borderRadius: "5px",
 };
-
-export default Report;

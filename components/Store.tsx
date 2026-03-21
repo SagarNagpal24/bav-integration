@@ -74,59 +74,69 @@ export default function Store({
   };
 
   const downloadExcel = () => {
-    const headers = ["Code", "MMScode", "Title", "Saleprice", "Type"] as const;
+  const headers: Array<"Code" | "MMScode" | "Title" | "Saleprice" | "Type"> = [
+    "Code",
+    "MMScode",
+    "Title",
+    "Saleprice",
+    "Type",
+  ];
 
-    const rows = items.map((it) => ({
-      Code: it.Code ?? "",
-      MMScode: it.MMScode ?? "",
-      Title: it.Title ?? "",
-      Saleprice: parseMoney(it.Saleprice),
-      Type: it.Type ?? "",
-    }));
+  const rows: Array<{
+    Code: string;
+    MMScode: string;
+    Title: string;
+    Saleprice: number | null;
+    Type: string;
+  }> = items.map((it) => ({
+    Code: it.Code ?? "",
+    MMScode: it.MMScode ?? "",
+    Title: it.Title ?? "",
+    Saleprice: parseMoney(it.Saleprice),
+    Type: it.Type ?? "",
+  }));
 
-    const ws = XLSX.utils.aoa_to_sheet([headers]);
-    XLSX.utils.sheet_add_json(ws, rows, {
-      header: [...headers],
-      skipHeader: true,
-      origin: "A2",
-    });
+  const ws = XLSX.utils.aoa_to_sheet([headers]);
 
-    if (ws["!ref"]) {
-      const range = XLSX.utils.decode_range(ws["!ref"]);
-      for (let R = range.s.r + 1; R <= range.e.r; R++) {
-        const ref = XLSX.utils.encode_cell({ r: R, c: 3 });
-        const rowIdx = R - 1;
-        const v = rows[rowIdx]?.Saleprice;
-        if (typeof v === "number" && Number.isFinite(v)) {
-          ws[ref] = ws[ref] || {};
-          ws[ref].v = v;
-          ws[ref].t = "n";
-          ws[ref].z = "#,##0.00";
-        } else if (ws[ref]) {
-          ws[ref].v = "";
-          ws[ref].t = "s";
-        }
+  XLSX.utils.sheet_add_json(ws, rows, {
+    header: headers,
+    skipHeader: true,
+    origin: "A2",
+  });
+
+  if (ws["!ref"]) {
+    const range = XLSX.utils.decode_range(ws["!ref"]);
+    for (let R = range.s.r + 1; R <= range.e.r; R++) {
+      const ref = XLSX.utils.encode_cell({ r: R, c: 3 });
+      const rowIdx = R - 1;
+      const v = rows[rowIdx]?.Saleprice;
+
+      if (typeof v === "number" && Number.isFinite(v)) {
+        ws[ref] = ws[ref] || {};
+        ws[ref].v = v;
+        ws[ref].t = "n";
+        ws[ref].z = "#,##0.00";
+      } else if (ws[ref]) {
+        ws[ref].v = "";
+        ws[ref].t = "s";
       }
     }
+  }
 
-    ws["!cols"] = headers.map((key) => ({
-      wch:
-        Math.min(
-          60,
-          Math.max(
-            key.length,
-            ...rows.map((r) => String(r[key] ?? "").length)
-          ) + 2
-        ),
-    }));
+  ws["!cols"] = headers.map((key) => ({
+    wch:
+      Math.min(
+        60,
+        Math.max(key.length, ...rows.map((r) => String(r[key] ?? "").length)) + 2
+      ),
+  }));
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "StoreItems");
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "StoreItems");
 
-    const today = new Date().toISOString().split("T")[0];
-    XLSX.writeFile(wb, `store-items-${today}.xlsx`);
-  };
-
+  const today = new Date().toISOString().split("T")[0];
+  XLSX.writeFile(wb, `store-items-${today}.xlsx`);
+};
   const createItemDefault = async (payload: Item) => {
     const res = await fetch(`/api/items`, {
       method: "POST",

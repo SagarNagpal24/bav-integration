@@ -34,7 +34,7 @@ export default function Cart({
         }}
       >
         <span>Cart</span>
-        <span style={{ fontSize: 14, fontWeight: 700 }}>
+        <span style={{ fontSize: 14, fontWeight: 700}}>
           Total Sale Today : ₹{Number(todayTotal || 0).toFixed(2)}
         </span>
       </h3>
@@ -42,15 +42,15 @@ export default function Cart({
       <table>
         <thead>
           <tr>
-            <th>S.No.</th>
-            <th>Code</th>
-            <th>MMScode</th>
-            <th>Title</th>
-            <th>Saleprice</th>
-            <th>Type</th>
-            <th>Qty</th>
-            <th>Total</th>
-            <th>Remove</th>
+           <th style={{ whiteSpace: "nowrap" }}>S.No.</th>
+            <th style={{ whiteSpace: "nowrap" }}>Code</th>
+            <th style={{ whiteSpace: "nowrap" }}>MMScode</th>
+            <th style={{ whiteSpace: "nowrap" }}>Title</th>
+            <th style={{ whiteSpace: "nowrap" }}>Saleprice</th>
+            <th style={{ whiteSpace: "nowrap" }}>Type</th>
+            <th style={{ whiteSpace: "nowrap" }}>Qty</th>
+            <th style={{ whiteSpace: "nowrap" }}>Total</th>
+            <th style={{ whiteSpace: "nowrap" }}>Remove</th>
           </tr>
         </thead>
 

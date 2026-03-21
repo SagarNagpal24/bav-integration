@@ -14,8 +14,13 @@ export default function Login({ onLoginSuccess }: LoginProps) {
   const handleSuccess = async (credentialResponse: CredentialResponse) => {
     setError("");
 
+    if (!credentialResponse.credential) {
+      setError("Google did not return a credential.");
+      return;
+    }
+
     try {
-      const res = await fetch(`/api/auth/google`, {
+      const res = await fetch("/api/auth/google", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -26,7 +31,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         setError(data?.error || "Login failed");
@@ -69,6 +74,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           <GoogleLogin
             onSuccess={handleSuccess}
             onError={() => setError("Google sign-in failed")}
+            useOneTap={false}
           />
         </div>
 

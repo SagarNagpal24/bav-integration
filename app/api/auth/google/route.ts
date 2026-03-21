@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyGoogleCredential, createSessionToken } from "@/lib/auth";
 
-export async function POST(req) {
+export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { credential } = body || {};
@@ -31,11 +31,12 @@ export async function POST(req) {
     });
 
     return response;
-  } catch (e) {
+  } catch (e: unknown) {
     console.error("Google auth error:", e);
-    return NextResponse.json(
-      { error: e.message || "Authentication failed" },
-      { status: 401 }
-    );
+
+    const message =
+      e instanceof Error ? e.message : "Authentication failed";
+
+    return NextResponse.json({ error: message }, { status: 401 });
   }
 }

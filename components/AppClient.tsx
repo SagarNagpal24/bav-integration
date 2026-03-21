@@ -508,7 +508,7 @@ function BillingApp({
       )}
 
       {view === "billing" ? (
-        <div className="container">
+       <div style={{ width: "100%", padding: "10px 20px" }}>
           <div className="top-bar">
             <div className="top-bar-left" style={{ flex: 1 }}>
               <form
@@ -639,14 +639,14 @@ function BillingApp({
             </div>
           </div>
 
-          <div className="flex">
-            <Cart
-              cart={cart}
-              updateQty={updateQty}
-              removeFromCart={removeFromCart}
-              todayTotal={todayTotal}
-            />
-          </div>
+         <div style={{ width: "100%" }}>
+  <Cart
+    cart={cart}
+    updateQty={updateQty}
+    removeFromCart={removeFromCart}
+    todayTotal={todayTotal}
+  />
+</div>
 
           <h2 className="total">Total Bill: ₹{total.toFixed(2)}</h2>
         </div>

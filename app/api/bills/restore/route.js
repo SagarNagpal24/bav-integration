@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { normalizeBillPayload } from "@/lib/helpers";
-import Bill from "@/models/Bill";
+import Bill from "@/models/bill";
 
 export async function POST(req) {
   try {

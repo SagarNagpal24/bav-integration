@@ -18,9 +18,10 @@ type StoreProps = {
   onCreateItem?: (payload: Item) => Promise<void>;
   onUpdateItem?: (code: string, payload: Item) => Promise<void>;
   onDeleteItem?: (code: string) => Promise<void>;
+  onBulkCreateItems?: (payloads: Item[]) => Promise<void>;
 };
 
-const TYPE_OPTIONS = ["Book", "Audio", "Photo","Calendar"];
+const TYPE_OPTIONS = ["Book", "Audio", "Photo", "Calendar"];
 
 export default function Store({
   items = [],
@@ -29,10 +30,18 @@ export default function Store({
   onCreateItem,
   onUpdateItem,
   onDeleteItem,
+  onBulkCreateItems,
 }: StoreProps) {
   const [query, setQuery] = useState("");
 
-  const emptyForm = { Code: "", MMScode: "", Title: "", Saleprice: "", Type: "" };
+  const emptyForm = {
+    Code: "",
+    MMScode: "",
+    Title: "",
+    Saleprice: "",
+    Type: "",
+  };
+
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<"add" | "edit">("add");
   const [form, setForm] = useState(emptyForm);
@@ -42,8 +51,27 @@ export default function Store({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmCode, setConfirmCode] = useState<string | null>(null);
 
-  const codeSet = useMemo(
-    () => new Set(items.map((it) => String(it.Code ?? ""))),
+  const [importConfirmOpen, setImportConfirmOpen] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [newImportItems, setNewImportItems] = useState<Item[]>([]);
+  const [existingImportItems, setExistingImportItems] = useState<Item[]>([]);
+  const [importDuplicatesInFile, setImportDuplicatesInFile] = useState<Item[]>([]);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+
+  const parseMoney = (v: unknown) => {
+    if (v === null || v === undefined || v === "") return null;
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    const n = parseFloat(String(v).replace(/[^\d.-]/g, "").trim());
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const normalizeKeyPart = (v: unknown) => String(v ?? "").trim().toLowerCase();
+
+  const getCompositeKey = (code: unknown, mms: unknown) =>
+    `${normalizeKeyPart(mms)}|${normalizeKeyPart(code)}`;
+
+  const itemKeySet = useMemo(
+    () => new Set(items.map((it) => getCompositeKey(it.Code, it.MMScode))),
     [items]
   );
 
@@ -66,77 +94,71 @@ export default function Store({
     });
   }, [items, query]);
 
-  const parseMoney = (v: unknown) => {
-    if (v === null || v === undefined || v === "") return null;
-    if (typeof v === "number" && Number.isFinite(v)) return v;
-    const n = parseFloat(String(v).replace(/[^\d.-]/g, "").trim());
-    return Number.isFinite(n) ? n : null;
-  };
-
   const downloadExcel = () => {
-  const headers: Array<"Code" | "MMScode" | "Title" | "Saleprice" | "Type"> = [
-    "Code",
-    "MMScode",
-    "Title",
-    "Saleprice",
-    "Type",
-  ];
+    const headers: Array<"Code" | "MMScode" | "Title" | "Saleprice" | "Type"> = [
+      "Code",
+      "MMScode",
+      "Title",
+      "Saleprice",
+      "Type",
+    ];
 
-  const rows: Array<{
-    Code: string;
-    MMScode: string;
-    Title: string;
-    Saleprice: number | null;
-    Type: string;
-  }> = items.map((it) => ({
-    Code: it.Code ?? "",
-    MMScode: it.MMScode ?? "",
-    Title: it.Title ?? "",
-    Saleprice: parseMoney(it.Saleprice),
-    Type: it.Type ?? "",
-  }));
+    const rows: Array<{
+      Code: string;
+      MMScode: string;
+      Title: string;
+      Saleprice: number | null;
+      Type: string;
+    }> = items.map((it) => ({
+      Code: it.Code ?? "",
+      MMScode: it.MMScode ?? "",
+      Title: it.Title ?? "",
+      Saleprice: parseMoney(it.Saleprice),
+      Type: it.Type ?? "",
+    }));
 
-  const ws = XLSX.utils.aoa_to_sheet([headers]);
+    const ws = XLSX.utils.aoa_to_sheet([headers]);
 
-  XLSX.utils.sheet_add_json(ws, rows, {
-    header: headers,
-    skipHeader: true,
-    origin: "A2",
-  });
+    XLSX.utils.sheet_add_json(ws, rows, {
+      header: headers,
+      skipHeader: true,
+      origin: "A2",
+    });
 
-  if (ws["!ref"]) {
-    const range = XLSX.utils.decode_range(ws["!ref"]);
-    for (let R = range.s.r + 1; R <= range.e.r; R++) {
-      const ref = XLSX.utils.encode_cell({ r: R, c: 3 });
-      const rowIdx = R - 1;
-      const v = rows[rowIdx]?.Saleprice;
+    if (ws["!ref"]) {
+      const range = XLSX.utils.decode_range(ws["!ref"]);
+      for (let R = range.s.r + 1; R <= range.e.r; R++) {
+        const ref = XLSX.utils.encode_cell({ r: R, c: 3 });
+        const rowIdx = R - 1;
+        const v = rows[rowIdx]?.Saleprice;
 
-      if (typeof v === "number" && Number.isFinite(v)) {
-        ws[ref] = ws[ref] || {};
-        ws[ref].v = v;
-        ws[ref].t = "n";
-        ws[ref].z = "#,##0.00";
-      } else if (ws[ref]) {
-        ws[ref].v = "";
-        ws[ref].t = "s";
+        if (typeof v === "number" && Number.isFinite(v)) {
+          ws[ref] = ws[ref] || {};
+          ws[ref].v = v;
+          ws[ref].t = "n";
+          ws[ref].z = "#,##0.00";
+        } else if (ws[ref]) {
+          ws[ref].v = "";
+          ws[ref].t = "s";
+        }
       }
     }
-  }
 
-  ws["!cols"] = headers.map((key) => ({
-    wch:
-      Math.min(
-        60,
-        Math.max(key.length, ...rows.map((r) => String(r[key] ?? "").length)) + 2
-      ),
-  }));
+    ws["!cols"] = headers.map((key) => ({
+      wch:
+        Math.min(
+          60,
+          Math.max(key.length, ...rows.map((r) => String(r[key] ?? "").length)) + 2
+        ),
+    }));
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "StoreItems");
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "StoreItems");
 
-  const today = new Date().toISOString().split("T")[0];
-  XLSX.writeFile(wb, `store-items-${today}.xlsx`);
-};
+    const today = new Date().toISOString().split("T")[0];
+    XLSX.writeFile(wb, `store-items-${today}.xlsx`);
+  };
+
   const createItemDefault = async (payload: Item) => {
     const res = await fetch(`/api/items`, {
       method: "POST",
@@ -165,9 +187,25 @@ export default function Store({
     if (!res.ok) throw new Error(`Delete failed (${res.status})`);
   };
 
+  const bulkCreateItemsDefault = async (payloads: Item[]) => {
+    const res = await fetch(`/api/items/bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ items: payloads }),
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      throw new Error(data?.error || `Bulk import failed (${res.status})`);
+    }
+  };
+
   const createItem = onCreateItem || createItemDefault;
   const updateItem = onUpdateItem || updateItemDefault;
   const deleteItem = onDeleteItem || deleteItemDefault;
+  const bulkCreateItems = onBulkCreateItems || bulkCreateItemsDefault;
 
   const openAdd = () => {
     setMode("add");
@@ -202,15 +240,21 @@ export default function Store({
 
   const validate = () => {
     if (!String(form.Code || "").trim()) return "Code is required.";
-    if (mode === "add" && codeSet.has(String(form.Code))) {
-      return `Code "${form.Code}" already exists.`;
+
+    if (
+      mode === "add" &&
+      itemKeySet.has(getCompositeKey(form.Code, form.MMScode))
+    ) {
+      return `Item with MMS Code "${form.MMScode}" and Code "${form.Code}" already exists.`;
     }
+
     if (
       String(form.Saleprice).trim() !== "" &&
       parseMoney(form.Saleprice) === null
     ) {
       return "Saleprice must be a number (or leave blank).";
     }
+
     return null;
   };
 
@@ -252,6 +296,130 @@ export default function Store({
     }
   };
 
+  const handleImportWithComparison = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    try {
+      setImportMessage(null);
+
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      if (typeof handleFileUpload === "function") {
+        try {
+          handleFileUpload(e);
+        } catch {
+          // keep old prop optional and non-blocking
+        }
+      }
+
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array" });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+
+      const rawRows = XLSX.utils.sheet_to_json<Record<string, any>>(firstSheet, {
+        defval: "",
+      });
+
+      if (!rawRows.length) {
+        alert("The uploaded file is empty.");
+        e.target.value = "";
+        return;
+      }
+
+      const parsedRows: Item[] = rawRows.map((row) => ({
+        Code: String(row.Code ?? "").trim(),
+        MMScode: String(row.MMScode ?? row["MMS Code"] ?? "").trim(),
+        Title: String(row.Title ?? "").trim(),
+        Saleprice:
+          String(row.Saleprice ?? "").trim() === ""
+            ? null
+            : parseMoney(row.Saleprice),
+        Type: String(row.Type ?? "").trim(),
+      }));
+
+      const existingKeySet = new Set(
+        items.map((it) => getCompositeKey(it.Code, it.MMScode))
+      );
+
+      const seenUploadKeys = new Set<string>();
+      const newItems: Item[] = [];
+      const existingItems: Item[] = [];
+      const duplicateItemsInFile: Item[] = [];
+
+      for (const row of parsedRows) {
+        const code = String(row.Code ?? "").trim();
+        const mms = String(row.MMScode ?? "").trim();
+
+        if (!code && !mms) continue;
+
+        const key = getCompositeKey(code, mms);
+
+        if (seenUploadKeys.has(key)) {
+          duplicateItemsInFile.push(row);
+          continue;
+        }
+
+        seenUploadKeys.add(key);
+
+        if (existingKeySet.has(key)) {
+          existingItems.push(row);
+        } else {
+          newItems.push(row);
+        }
+      }
+
+      setExistingImportItems(existingItems);
+      setNewImportItems(newItems);
+      setImportDuplicatesInFile(duplicateItemsInFile);
+
+      if (newItems.length === 0) {
+        alert(
+          `All uploaded items already exist in the database. Existing matches: ${existingItems.length}`
+        );
+        e.target.value = "";
+        return;
+      }
+
+      setImportConfirmOpen(true);
+    } catch (error: any) {
+      alert(error?.message || "Failed to read uploaded file.");
+    } finally {
+      e.target.value = "";
+    }
+  };
+
+  const closeImportConfirm = () => {
+    if (!importBusy) {
+      setImportConfirmOpen(false);
+      setNewImportItems([]);
+      setExistingImportItems([]);
+      setImportDuplicatesInFile([]);
+      setImportMessage(null);
+    }
+  };
+
+  const confirmImportNewItems = async () => {
+    if (!newImportItems.length) return;
+
+    setImportBusy(true);
+    setImportMessage(null);
+
+    try {
+      await bulkCreateItems(newImportItems);
+      setImportConfirmOpen(false);
+      setNewImportItems([]);
+      setExistingImportItems([]);
+      setImportDuplicatesInFile([]);
+      if (typeof onRefresh === "function") onRefresh();
+      alert(`${newImportItems.length} new item(s) added successfully.`);
+    } catch (error: any) {
+      setImportMessage(error?.message || "Import failed.");
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
   const openDeleteConfirm = (code?: string) => {
     if (!code) return;
     setConfirmCode(code);
@@ -290,11 +458,12 @@ export default function Store({
       if (e.key === "Escape") {
         if (isOpen) closeModal();
         if (confirmOpen) closeDeleteConfirm();
+        if (importConfirmOpen) closeImportConfirm();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, confirmOpen, busy]);
+  }, [isOpen, confirmOpen, importConfirmOpen, busy, importBusy]);
 
   return (
     <div className="container">
@@ -313,7 +482,7 @@ export default function Store({
           <input
             type="file"
             accept=".xlsx, .xls"
-            onChange={handleFileUpload}
+            onChange={handleImportWithComparison}
             title="Choose Excel file to import"
           />
           {typeof onRefresh === "function" && (
@@ -403,7 +572,7 @@ export default function Store({
           <tbody>
             {filtered.map((it, idx) => (
               <tr
-                key={`${it.Code ?? ""}${idx}`}
+                key={`${it.MMScode ?? ""}-${it.Code ?? ""}-${idx}`}
                 style={{ borderTop: "1px solid #f1f1f1" }}
               >
                 <td style={td}>{idx + 1}</td>
@@ -491,7 +660,7 @@ export default function Store({
                   name="Code"
                   value={form.Code}
                   onChange={onFormChange}
-                  placeholder="Unique code"
+                  placeholder="Code"
                   style={input}
                   disabled={mode === "edit"}
                 />
@@ -631,6 +800,139 @@ export default function Store({
                 disabled={busy}
               >
                 {busy ? "Deleting..." : "Confirm Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importConfirmOpen && (
+        <div style={backdropStyle} onMouseDown={closeImportConfirm}>
+          <div
+            style={{ ...confirmModalStyle, width: "min(700px, 100%)" }}
+            onMouseDown={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <h4 style={{ margin: 0 }}>Import Store Items</h4>
+
+            <p style={{ ...confirmText, marginTop: 12 }}>
+              <strong>{existingImportItems.length}</strong> item(s) already exist
+              in the database based on <strong>MMScode + Code</strong>.
+              <br />
+              <strong>{newImportItems.length}</strong> item(s) are new.
+              {importDuplicatesInFile.length > 0 && (
+                <>
+                  <br />
+                  <strong>{importDuplicatesInFile.length}</strong> duplicate row(s)
+                  were also found inside the uploaded file and will be skipped.
+                </>
+              )}
+              <br />
+              Do you want to add only the new items?
+            </p>
+
+            {existingImportItems.length > 0 && (
+              <div
+                style={{
+                  marginTop: 12,
+                  maxHeight: 160,
+                  overflow: "auto",
+                  border: "1px solid #eee",
+                  borderRadius: 8,
+                  padding: 8,
+                  fontSize: 13,
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                  Already existing items
+                </div>
+                {existingImportItems.map((it, idx) => (
+                  <div key={`existing-${it.MMScode}-${it.Code}-${idx}`}>
+                    {it.MMScode} | {it.Code} | {it.Title}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {importDuplicatesInFile.length > 0 && (
+              <div
+                style={{
+                  marginTop: 12,
+                  maxHeight: 160,
+                  overflow: "auto",
+                  border: "1px solid #eee",
+                  borderRadius: 8,
+                  padding: 8,
+                  fontSize: 13,
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                  Duplicate rows inside uploaded file
+                </div>
+                {importDuplicatesInFile.map((it, idx) => (
+                  <div key={`dup-${it.MMScode}-${it.Code}-${idx}`}>
+                    {it.MMScode} | {it.Code} | {it.Title}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {newImportItems.length > 0 && (
+              <div
+                style={{
+                  marginTop: 12,
+                  maxHeight: 180,
+                  overflow: "auto",
+                  border: "1px solid #eee",
+                  borderRadius: 8,
+                  padding: 8,
+                  fontSize: 13,
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                  New items to be added
+                </div>
+                {newImportItems.map((it, idx) => (
+                  <div key={`new-${it.MMScode}-${it.Code}-${idx}`}>
+                    {it.MMScode} | {it.Code} | {it.Title}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {importMessage && (
+              <div style={{ marginTop: 10, color: "#b00020", fontSize: 13 }}>
+                {importMessage}
+              </div>
+            )}
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                marginTop: 14,
+              }}
+            >
+              <button
+                type="button"
+                className="secondary"
+                onClick={closeImportConfirm}
+                disabled={importBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={confirmImportNewItems}
+                disabled={importBusy || newImportItems.length === 0}
+                style={{ backgroundColor: "#0d6efd", color: "white" }}
+              >
+                {importBusy
+                  ? "Importing..."
+                  : `Add ${newImportItems.length} New Item(s)`}
               </button>
             </div>
           </div>

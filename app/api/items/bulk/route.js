@@ -19,11 +19,15 @@ export async function POST(req) {
     const ops = items
       .map((raw) => {
         const it = normalizeItem(raw);
+
         if (!it.Code) return null;
 
         return {
           updateOne: {
-            filter: { Code: it.Code },
+            filter: {
+              Code: it.Code,
+              MMScode: it.MMScode || "",
+            },
             update: { $set: it },
             upsert: true,
           },

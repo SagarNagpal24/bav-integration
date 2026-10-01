@@ -6,8 +6,13 @@ import { normalizeItem } from "@/lib/helpers";
 
 export async function GET(req) {
   try {
-    await connectDB();
     await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
 
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("q") || "").trim();
@@ -26,15 +31,20 @@ export async function GET(req) {
     const items = await Item.find(filter).lean();
     return NextResponse.json(items);
   } catch (e) {
-    console.error(e);
+    console.error("GET /api/items error:", e);
     return NextResponse.json({ error: "Failed to fetch items" }, { status: 500 });
   }
 }
 
 export async function POST(req) {
   try {
-    await connectDB();
     await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
 
     const body = await req.json();
     const it = normalizeItem(body || {});
@@ -54,7 +64,7 @@ export async function POST(req) {
     const doc = await Item.create(it);
     return NextResponse.json(doc, { status: 201 });
   } catch (e) {
-    console.error(e);
+    console.error("POST /api/items error:", e);
     if (e?.code === 11000) {
       return NextResponse.json({ error: "Duplicate Code" }, { status: 409 });
     }

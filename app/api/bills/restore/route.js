@@ -6,8 +6,13 @@ import Bill from "@/models/bill";
 
 export async function POST(req) {
   try {
-    await connectDB();
     await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
 
     const body = await req.json();
 
@@ -49,7 +54,7 @@ export async function POST(req) {
       received: rawBills.length,
     });
   } catch (e) {
-    console.error(e);
+    console.error("POST /api/bills/restore error:", e);
     return NextResponse.json(
       { error: "Failed to restore bills backup" },
       { status: 500 }

@@ -7,8 +7,13 @@ import IdempotencyKey from "@/models/IdempotencyKey";
 
 export async function POST(req) {
   try {
-    await connectDB();
     await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
 
     const idemKey = String(req.headers.get("Idempotency-Key") || "").trim();
 
@@ -55,15 +60,20 @@ export async function POST(req) {
 
     return NextResponse.json(bill, { status: 201 });
   } catch (e) {
-    console.error(e);
+    console.error("POST /api/bills error:", e);
     return NextResponse.json({ error: "Failed to create bill" }, { status: 500 });
   }
 }
 
 export async function GET(req) {
   try {
-    await connectDB();
     await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
 
     const { searchParams } = new URL(req.url);
     const date = searchParams.get("date");
@@ -87,7 +97,7 @@ export async function GET(req) {
     const docs = await Bill.find(filter).sort({ createdAt: -1 }).lean();
     return NextResponse.json(docs);
   } catch (e) {
-    console.error(e);
+    console.error("GET /api/bills error:", e);
     return NextResponse.json({ error: "Failed to fetch bills" }, { status: 500 });
   }
 }

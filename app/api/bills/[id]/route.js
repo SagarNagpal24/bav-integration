@@ -5,8 +5,13 @@ import Bill from "@/models/bill";
 
 export async function DELETE(req, { params }) {
   try {
-    await connectDB();
     await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
 
     const { id } = params;
     const out = await Bill.findByIdAndDelete(id);
@@ -17,7 +22,7 @@ export async function DELETE(req, { params }) {
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    console.error(e);
+    console.error("DELETE /api/bills/[id] error:", e);
     return NextResponse.json({ error: "Failed to delete bill" }, { status: 500 });
   }
 }

@@ -6,8 +6,13 @@ import { normalizeItem } from "@/lib/helpers";
 
 export async function POST(req) {
   try {
-    await connectDB();
     await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
 
     const body = await req.json();
     const items = body.items || [];
@@ -50,7 +55,7 @@ export async function POST(req) {
       result,
     });
   } catch (e) {
-    console.error(e);
+    console.error("POST /api/items/bulk error:", e);
     return NextResponse.json(
       { error: "Failed to upsert items" },
       { status: 500 }

@@ -6,8 +6,13 @@ import { normalizeItem } from "@/lib/helpers";
 
 export async function GET(req, { params }) {
   try {
-    await connectDB();
     await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
 
     const code = String(params.code || "").trim();
     if (!code) {
@@ -24,15 +29,20 @@ export async function GET(req, { params }) {
 
     return NextResponse.json(doc);
   } catch (e) {
-    console.error(e);
+    console.error("GET /api/items/[code] error:", e);
     return NextResponse.json({ error: "Failed to fetch item" }, { status: 500 });
   }
 }
 
 export async function PUT(req, { params }) {
   try {
-    await connectDB();
     await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
 
     const code = String(params.code || "").trim();
     if (!code) {
@@ -60,15 +70,20 @@ export async function PUT(req, { params }) {
 
     return NextResponse.json(doc);
   } catch (e) {
-    console.error(e);
+    console.error("PUT /api/items/[code] error:", e);
     return NextResponse.json({ error: "Failed to update item" }, { status: 500 });
   }
 }
 
 export async function DELETE(req, { params }) {
   try {
-    await connectDB();
     await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
 
     const code = String(params.code || "").trim();
     if (!code) {
@@ -85,7 +100,7 @@ export async function DELETE(req, { params }) {
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    console.error(e);
+    console.error("DELETE /api/items/[code] error:", e);
     return NextResponse.json({ error: "Failed to delete item" }, { status: 500 });
   }
 }

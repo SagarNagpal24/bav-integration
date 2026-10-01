@@ -5,8 +5,13 @@ import Bill from "@/models/bill";
 
 export async function PATCH(req, { params }) {
   try {
-    await connectDB();
     await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
 
     const { id, idx } = params;
     const body = await req.json();
@@ -43,7 +48,7 @@ export async function PATCH(req, { params }) {
       return NextResponse.json(bill);
     }
   } catch (e) {
-    console.error(e);
+    console.error("PATCH /api/bills/[id]/items/[idx]/qty error:", e);
     return NextResponse.json(
       { error: "Failed to update quantity" },
       { status: 500 }

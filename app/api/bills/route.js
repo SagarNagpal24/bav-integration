@@ -7,8 +7,9 @@ import IdempotencyKey from "@/models/IdempotencyKey";
 import { applyInventoryDelta, billItemDeltas } from "@/lib/inventory";
 
 export async function POST(req) {
+  let user;
   try {
-    await requireAuth();
+    user = await requireAuth();
   } catch (e) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -30,6 +31,7 @@ export async function POST(req) {
 
     const body = await req.json();
     const payload = normalizeBillPayload(body || {});
+    payload.counter = user?.role || "shop";
     const { date, items, total } = payload;
 
     if (!date || !Array.isArray(items) || items.length === 0 || typeof total !== "number") {
@@ -73,8 +75,9 @@ export async function POST(req) {
 }
 
 export async function GET(req) {
+  let user;
   try {
-    await requireAuth();
+    user = await requireAuth();
   } catch (e) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -90,6 +93,17 @@ export async function GET(req) {
     const end = searchParams.get("end");
 
     let filter = {};
+
+    if (user?.role === "shop") {
+      filter.counter = "shop";
+    } else if (user?.role === "stall") {
+      filter.counter = "stall";
+    } else {
+      const counter = searchParams.get("counter");
+      if (counter === "shop" || counter === "stall") {
+        filter.counter = counter;
+      }
+    }
 
     if (date) {
       filter.date = date;

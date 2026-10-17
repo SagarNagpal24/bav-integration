@@ -36,6 +36,7 @@ type StoreProps = {
   onDeleteItem?: (code: string) => Promise<void>;
   onBulkCreateItems?: (payloads: Item[]) => Promise<void>;
   onUploadStock?: (rows: StockRow[]) => Promise<StockUploadResult>;
+  readOnly?: boolean;
 };
 
 const TYPE_OPTIONS = ["Book", "Audio", "Photo", "Calendar"];
@@ -139,6 +140,7 @@ export default function Store({
   onDeleteItem,
   onBulkCreateItems,
   onUploadStock,
+  readOnly = false,
 }: StoreProps) {
   const [query, setQuery] = useState("");
   const [stockBusy, setStockBusy] = useState(false);
@@ -733,35 +735,41 @@ export default function Store({
           marginBottom: 12,
         }}
       >
-        <h3 style={{ margin: 0 }}>📦 Store</h3>
+        <h3 style={{ margin: 0 }}>
+          📦 Store{readOnly ? " — Read Only" : ""}
+        </h3>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="file"
-            accept=".xlsx, .xls"
-            onChange={handleImportWithComparison}
-            title="Choose Excel file to import"
-          />
-          <label
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#0d6efd",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Stock In:
-            <input
-              type="file"
-              accept=".csv, .xlsx, .xls"
-              onChange={handleStockUpload}
-              disabled={stockBusy}
-              title="Upload stock receipt (Item No + Quantity)"
-            />
-          </label>
+          {!readOnly && (
+            <>
+              <input
+                type="file"
+                accept=".xlsx, .xls"
+                onChange={handleImportWithComparison}
+                title="Choose Excel file to import"
+              />
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#0d6efd",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Stock In:
+                <input
+                  type="file"
+                  accept=".csv, .xlsx, .xls"
+                  onChange={handleStockUpload}
+                  disabled={stockBusy}
+                  title="Upload stock receipt (Item No + Quantity)"
+                />
+              </label>
+            </>
+          )}
           {typeof onRefresh === "function" && (
             <button onClick={onRefresh} className="primary">
               Refresh Items
@@ -774,13 +782,15 @@ export default function Store({
           >
             Download Items (Excel)
           </button>
-          <button
-            onClick={openAdd}
-            className="secondary"
-            style={{ backgroundColor: "#0d6efd", color: "white" }}
-          >
-            + Add Item
-          </button>
+          {!readOnly && (
+            <button
+              onClick={openAdd}
+              className="secondary"
+              style={{ backgroundColor: "#0d6efd", color: "white" }}
+            >
+              + Add Item
+            </button>
+          )}
         </div>
       </div>
 
@@ -889,7 +899,7 @@ export default function Store({
               <th style={th}>Sale Price</th>
               <th style={th}>Inventory</th>
               <th style={th}>Type</th>
-              <th style={th}>Actions</th>
+              {!readOnly && <th style={th}>Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -907,6 +917,8 @@ export default function Store({
                   it.Saleprice !== null &&
                   String(it.Saleprice) !== "" ? (
                     `₹${Number(it.Saleprice).toFixed(2)}`
+                  ) : readOnly ? (
+                    "—"
                   ) : (
                     <button
                       className="secondary"
@@ -924,40 +936,46 @@ export default function Store({
                   )}
                 </td>
                 <td style={td}>
-                  <StockCell
-                    item={it}
-                    onSave={async (code, inventory) => {
-                      await updateInventory(code, inventory);
-                      if (typeof onRefresh === "function") onRefresh();
-                    }}
-                  />
+                  {readOnly ? (
+                    Number(it.Inventory ?? 0)
+                  ) : (
+                    <StockCell
+                      item={it}
+                      onSave={async (code, inventory) => {
+                        await updateInventory(code, inventory);
+                        if (typeof onRefresh === "function") onRefresh();
+                      }}
+                    />
+                  )}
                 </td>
                 <td style={td}>{it.Type}</td>
-                <td style={{ ...td, whiteSpace: "nowrap" }}>
-                  <button
-                    className="secondary"
-                    onClick={() => openEdit(it)}
-                    style={{ marginRight: 6 }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="secondary"
-                    onClick={() => onDelete(it.Code)}
-                    style={{ backgroundColor: "#dc3545", color: "white" }}
-                    disabled={busy}
-                    title="Delete"
-                  >
-                    Delete
-                  </button>
-                </td>
+                {!readOnly && (
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>
+                    <button
+                      className="secondary"
+                      onClick={() => openEdit(it)}
+                      style={{ marginRight: 6 }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={() => onDelete(it.Code)}
+                      style={{ backgroundColor: "#dc3545", color: "white" }}
+                      disabled={busy}
+                      title="Delete"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
 
             {filtered.length === 0 && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={readOnly ? 7 : 8}
                   style={{ ...td, textAlign: "center", padding: 24 }}
                 >
                   No items match your search.

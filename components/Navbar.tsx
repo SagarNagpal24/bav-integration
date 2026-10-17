@@ -6,6 +6,7 @@ export type User = {
   email?: string;
   name?: string;
   picture?: string;
+  role?: string | null;
 };
 
 type NavbarProps = {
@@ -13,6 +14,12 @@ type NavbarProps = {
   setView: (view: string) => void;
   user?: User | null;
   onLogout?: () => void;
+};
+
+export const ROLE_LABELS: Record<string, string> = {
+  shop: "Shop POS",
+  stall: "Stall POS",
+  admin: "Admin",
 };
 
 export default function Navbar({
@@ -23,7 +30,25 @@ export default function Navbar({
 }: NavbarProps) {
   return (
     <nav className="navbar">
-      <h2>📑 BAV Billing App</h2>
+      <h2>
+        📑 BAV Billing App
+        {user?.role && ROLE_LABELS[user.role] ? (
+          <span
+            style={{
+              marginLeft: 10,
+              fontSize: 13,
+              padding: "3px 10px",
+              borderRadius: 999,
+              background:
+                user.role === "admin" ? "#4a148c" : user.role === "shop" ? "#1b5e20" : "#e65100",
+              color: "white",
+              verticalAlign: "middle",
+            }}
+          >
+            {ROLE_LABELS[user.role]}
+          </span>
+        ) : null}
+      </h2>
 
       <div
         style={{

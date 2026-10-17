@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, requireAdmin } from "@/lib/auth";
 import Item from "@/models/Item";
 import { normalizeItem } from "@/lib/helpers";
 
@@ -38,7 +38,7 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
-    await requireAuth();
+    await requireAdmin();
   } catch (e) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

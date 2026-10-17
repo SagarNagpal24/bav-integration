@@ -18,6 +18,7 @@ type BillItem = {
 type Bill = {
   _id?: string;
   date?: string;
+  counter?: string;
   items?: BillItem[];
   total?: number;
 };
@@ -36,10 +37,14 @@ type PendingQtyState = {
 
 type ReportProps = {
   onSalesChanged?: () => void;
+  userRole?: string | null;
 };
 
-export default function Report({ onSalesChanged }: ReportProps) {
+const VALID_COUNTERS = ["shop", "stall"] as const;
+
+export default function Report({ onSalesChanged, userRole }: ReportProps) {
   const [bills, setBills] = useState<Bill[]>([]);
+  const [counter, setCounter] = useState<"all" | "shop" | "stall">("all");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const today = new Date().toISOString().split("T")[0];
@@ -75,6 +80,19 @@ export default function Report({ onSalesChanged }: ReportProps) {
     return d >= s && d <= e;
   };
 
+  const counterParam =
+    userRole === "admin" &&
+    (VALID_COUNTERS as readonly string[]).includes(counter)
+      ? `counter=${counter}`
+      : "";
+
+  const withCounter = (base: string) => {
+    if (!counterParam) return base;
+    return base.includes("?")
+      ? `${base}&${counterParam}`
+      : `${base}?${counterParam}`;
+  };
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -82,7 +100,7 @@ export default function Report({ onSalesChanged }: ReportProps) {
           ? `/api/bills?date=${encodeURIComponent(selectedDate)}`
           : `/api/bills`;
 
-        const res = await fetch(url, { credentials: "include" });
+        const res = await fetch(withCounter(url), { credentials: "include" });
         const data = await res.json();
         setBills(Array.isArray(data) ? data : []);
       } catch {
@@ -91,7 +109,7 @@ export default function Report({ onSalesChanged }: ReportProps) {
     };
 
     load();
-  }, [selectedDate]);
+  }, [selectedDate, counterParam]);
 
   useEffect(() => {
     if (!alertMsg) return;
@@ -104,7 +122,7 @@ export default function Report({ onSalesChanged }: ReportProps) {
       ? `/api/bills?date=${encodeURIComponent(selectedDate)}`
       : `/api/bills`;
 
-    const res = await fetch(url, { credentials: "include" });
+    const res = await fetch(withCounter(url), { credentials: "include" });
     const data = await res.json();
     setBills(Array.isArray(data) ? data : []);
   };
@@ -126,9 +144,9 @@ export default function Report({ onSalesChanged }: ReportProps) {
     if (!validateRange()) return;
 
     try {
-      const listUrl = `/api/bills?start=${encodeURIComponent(
-        rangeStart
-      )}&end=${encodeURIComponent(rangeEnd)}`;
+      const listUrl = withCounter(
+        `/api/bills?start=${encodeURIComponent(rangeStart)}&end=${encodeURIComponent(rangeEnd)}`
+      );
 
       const listRes = await fetch(listUrl, { credentials: "include" });
       let list: Bill[] = [];
@@ -341,6 +359,7 @@ export default function Report({ onSalesChanged }: ReportProps) {
         rows.push({
           BillNo: String(billNoOf(bill)),
           Date: bill.date || "",
+          Counter: bill.counter === "stall" ? "Stall" : "Shop",
           Code: item.Code || "",
           MMScode: item.MMScode || "",
           Title: item.Title || "",
@@ -374,9 +393,9 @@ export default function Report({ onSalesChanged }: ReportProps) {
     }
 
     try {
-      const url = `/api/bills?start=${encodeURIComponent(
-        exportStart
-      )}&end=${encodeURIComponent(exportEnd)}`;
+      const url = withCounter(
+        `/api/bills?start=${encodeURIComponent(exportStart)}&end=${encodeURIComponent(exportEnd)}`
+      );
 
       const res = await fetch(url, { credentials: "include" });
 
@@ -625,13 +644,37 @@ export default function Report({ onSalesChanged }: ReportProps) {
       <div
         style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
       >
-        <h2>Sales Report</h2>
-        <button
-          onClick={() => setShowRangeConfirm(true)}
-          style={{ background: "red", color: "white", padding: "6px 12px", borderRadius: "5px" }}
-        >
-          Clear Bills By Date
-        </button>
+        <h2 style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          Sales Report
+          {userRole === "admin" && (
+            <>
+              <b style={{ fontSize: 14 }}>Filter Counter:</b>
+              <select
+                value={counter}
+                onChange={(e) =>
+                  setCounter(e.target.value as "all" | "shop" | "stall")
+                }
+              >
+                <option value="all">All (Shop + Stall)</option>
+                <option value="shop">Shop</option>
+                <option value="stall">Stall</option>
+              </select>
+            </>
+          )}
+          {userRole === "shop" ? (
+            <span style={{ fontSize: 13, color: "#1b5e20", fontWeight: 700 }}>Shop</span>
+          ) : userRole === "stall" ? (
+            <span style={{ fontSize: 13, color: "#e65100", fontWeight: 700 }}>Stall</span>
+          ) : null}
+        </h2>
+        {userRole === "admin" && (
+          <button
+            onClick={() => setShowRangeConfirm(true)}
+            style={{ background: "red", color: "white", padding: "6px 12px", borderRadius: "5px" }}
+          >
+            Clear Bills By Date
+          </button>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -733,19 +776,22 @@ export default function Report({ onSalesChanged }: ReportProps) {
                 }}
               >
                 <h4>
-                  Bill #{billNo} — Date: {bill.date}
+                  Bill #{billNo} — Date: {bill.date} — Counter:{" "}
+                  {bill.counter === "stall" ? "Stall" : "Shop"}
                 </h4>
-                <button
-                  onClick={() => setDeleteIndex(globalIndex)}
-                  style={{
-                    background: "darkred",
-                    color: "white",
-                    padding: "4px 10px",
-                    borderRadius: 5,
-                  }}
-                >
-                  Delete Bill
-                </button>
+                {userRole === "admin" && (
+                  <button
+                    onClick={() => setDeleteIndex(globalIndex)}
+                    style={{
+                      background: "darkred",
+                      color: "white",
+                      padding: "4px 10px",
+                      borderRadius: 5,
+                    }}
+                  >
+                    Delete Bill
+                  </button>
+                )}
               </div>
 
               <table border={1} cellPadding="5" style={{ width: "100%" }}>
@@ -824,19 +870,21 @@ export default function Report({ onSalesChanged }: ReportProps) {
                         <td>₹{it.Saleprice}</td>
                         <td>₹{subtotal}</td>
                         <td>
-                          <button
-                            onClick={() =>
-                              setDeleteItem({ billIndex: globalIndex, itemIndex: i })
-                            }
-                            style={{
-                              background: "orange",
-                              color: "white",
-                              padding: "4px 8px",
-                              borderRadius: 4,
-                            }}
-                          >
-                            Delete Item
-                          </button>
+                          {userRole === "admin" && (
+                            <button
+                              onClick={() =>
+                                setDeleteItem({ billIndex: globalIndex, itemIndex: i })
+                              }
+                              style={{
+                                background: "orange",
+                                color: "white",
+                                padding: "4px 8px",
+                                borderRadius: 4,
+                              }}
+                            >
+                              Delete Item
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -967,45 +1015,49 @@ export default function Report({ onSalesChanged }: ReportProps) {
           flexWrap: "wrap",
         }}
       >
-        <button
-          onClick={exportFullBackup}
-          style={{
-            background: "#455a64",
-            color: "white",
-            padding: "5px 10px",
-            borderRadius: 5,
-            fontSize: 12,
-            border: "none",
-            cursor: "pointer",
-          }}
-          title="Download full bills backup"
-        >
-          Backup Export
-        </button>
+        {userRole === "admin" && (
+          <>
+            <button
+              onClick={exportFullBackup}
+              style={{
+                background: "#455a64",
+                color: "white",
+                padding: "5px 10px",
+                borderRadius: 5,
+                fontSize: 12,
+                border: "none",
+                cursor: "pointer",
+              }}
+              title="Download full bills backup"
+            >
+              Backup Export
+            </button>
 
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          style={{
-            background: "#00897b",
-            color: "white",
-            padding: "5px 10px",
-            borderRadius: 5,
-            fontSize: 12,
-            border: "none",
-            cursor: "pointer",
-          }}
-          title="Upload bills backup file"
-        >
-          Backup Upload
-        </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                background: "#00897b",
+                color: "white",
+                padding: "5px 10px",
+                borderRadius: 5,
+                fontSize: 12,
+                border: "none",
+                cursor: "pointer",
+              }}
+              title="Upload bills backup file"
+            >
+              Backup Upload
+            </button>
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json,application/json"
-          style={{ display: "none" }}
-          onChange={importFullBackup}
-        />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              style={{ display: "none" }}
+              onChange={importFullBackup}
+            />
+          </>
+        )}
       </div>
     </div>
   );

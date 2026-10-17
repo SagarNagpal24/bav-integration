@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { requireAuth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import Item from "@/models/Item";
 
 export async function POST(req) {
   try {
-    await requireAuth();
+    await requireAdmin();
   } catch (e) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

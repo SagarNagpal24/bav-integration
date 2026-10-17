@@ -18,12 +18,17 @@ type CategorySummary = {
   amount: number;
 };
 
-export default function Summary() {
+type SummaryProps = {
+  userRole?: string | null;
+};
+
+export default function Summary({ userRole }: SummaryProps) {
   const [bills, setBills] = useState<Bill[]>([]);
 
   const today = new Date().toISOString().split("T")[0];
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
+  const [counter, setCounter] = useState<"all" | "shop" | "stall">("all");
   const [alertMsg, setAlertMsg] = useState("");
 
   useEffect(() => {
@@ -32,11 +37,11 @@ export default function Summary() {
         let url = `/api/bills`;
 
         if (startDate && endDate) {
-          url = `/api/bills?start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`;
+          url = `/api/bills?start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}${counterQuery}`;
         } else if (startDate) {
-          url = `/api/bills?date=${encodeURIComponent(startDate)}`;
+          url = `/api/bills?date=${encodeURIComponent(startDate)}${counterQuery}`;
         } else if (endDate) {
-          url = `/api/bills?date=${encodeURIComponent(endDate)}`;
+          url = `/api/bills?date=${encodeURIComponent(endDate)}${counterQuery}`;
         }
 
         const res = await fetch(url, { credentials: "include" });
@@ -64,7 +69,9 @@ export default function Summary() {
     };
 
     load();
-  }, [startDate, endDate]);
+  }, [startDate, endDate, counter]);
+
+  const counterQuery = counter !== "all" ? `&counter=${counter}` : "";
 
   const summary: Record<string, CategorySummary> = {};
 
@@ -140,6 +147,22 @@ export default function Summary() {
 
         <button onClick={resetToToday}>Today</button>
         <button onClick={showAll}>Show All</button>
+
+        {userRole === "admin" && (
+          <label style={{ marginLeft: 12 }}>
+            <b>Counter:</b>{" "}
+            <select
+              value={counter}
+              onChange={(e) =>
+                setCounter(e.target.value as "all" | "shop" | "stall")
+              }
+            >
+              <option value="all">All (Shop + Stall)</option>
+              <option value="shop">Shop</option>
+              <option value="stall">Stall</option>
+            </select>
+          </label>
+        )}
       </div>
 
       <div style={{ marginTop: 8, color: "#555" }}>

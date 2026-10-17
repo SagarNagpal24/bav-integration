@@ -659,14 +659,15 @@ function BillingApp({
           <h2 className="total">Total Bill: ₹{total.toFixed(2)}</h2>
         </div>
       ) : view === "report" ? (
-        <Report onSalesChanged={fetchTodayTotal} />
+        <Report onSalesChanged={fetchTodayTotal} userRole={user?.role} />
       ) : view === "summary" ? (
-        <Summary />
+        <Summary userRole={user?.role} />
       ) : view === "store" ? (
         <Store
           items={items}
           onRefresh={fetchItems}
           handleFileUpload={handleFileUpload}
+          readOnly={user?.role !== "admin"}
         />
       ) : null}
 

@@ -15,6 +15,7 @@ type Item = {
   Title?: string;
   Saleprice?: number | null;
   Type?: string;
+  Inventory?: number | null;
 };
 
 function BillingApp({
@@ -178,12 +179,19 @@ function BillingApp({
             r["rate"] ??
             r["amount"];
 
+          const invRaw =
+            r["inventory"] ?? r["stock"] ?? r["stock qty"] ?? r["quantity"] ?? r["qty"];
+
           return {
             Code: r["code"] || r["item code"] || r["barcode"] || "",
             MMScode: r["mms code"] || r["mmscode"] || r["mms"] || "",
             Title: r["title"] || r["name"] || r["item name"] || "",
             Saleprice: parseMoney(priceRaw),
             Type: r["type"] || r["category"] || "",
+            Inventory:
+              invRaw === undefined || String(invRaw).trim() === ""
+                ? undefined
+                : Math.max(0, Math.floor(parseMoney(invRaw))),
           };
         })
         .filter((r) => String(r.Code).trim() || String(r.Title).trim());

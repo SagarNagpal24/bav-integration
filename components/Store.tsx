@@ -9,6 +9,21 @@ type Item = {
   Title?: string;
   Saleprice?: number | string | null;
   Type?: string;
+  Inventory?: number | string | null;
+};
+
+type StockRow = {
+  MMScode: string;
+  qty: number;
+  Code?: string;
+  Title?: string;
+  Type?: string;
+};
+
+type StockUploadResult = {
+  updated?: number;
+  created?: number;
+  needsPrice?: string[];
 };
 
 type StoreProps = {
@@ -17,11 +32,102 @@ type StoreProps = {
   handleFileUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onCreateItem?: (payload: Item) => Promise<void>;
   onUpdateItem?: (code: string, payload: Item) => Promise<void>;
+  onUpdateInventory?: (code: string, inventory: number) => Promise<void>;
   onDeleteItem?: (code: string) => Promise<void>;
   onBulkCreateItems?: (payloads: Item[]) => Promise<void>;
+  onUploadStock?: (rows: StockRow[]) => Promise<StockUploadResult>;
 };
 
 const TYPE_OPTIONS = ["Book", "Audio", "Photo", "Calendar"];
+
+const toInventory = (v: unknown) => {
+  const n = Math.floor(Number(String(v ?? "").replace(/[^\d.-]/g, "").trim()));
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+};
+
+// Item names look like: "<Type> <Code>, <Title>"
+// e.g. "Photo CV-610-7-00-01, BJ-25 24x30 Baba Ji Canvas Photo"
+const parseItemName = (name: unknown, fallbackCode: string) => {
+  const raw = String(name ?? "").trim();
+  if (!raw) return { Type: "", Code: fallbackCode, Title: "" };
+
+  const commaIdx = raw.indexOf(",");
+  const head = (commaIdx >= 0 ? raw.slice(0, commaIdx) : raw).trim();
+  const title = commaIdx >= 0 ? raw.slice(commaIdx + 1).trim() : "";
+
+  const parts = head.split(/\s+/).filter(Boolean);
+  let type = "";
+  let code = "";
+
+  if (parts.length > 1) {
+    type = parts[0];
+    code = parts.slice(1).join(" ").trim();
+  } else if (parts.length === 1) {
+    code = parts[0];
+  }
+
+  return { Type: type, Code: code || fallbackCode, Title: title };
+};
+
+const needsPrice = (it: Item) =>
+  it.Saleprice === undefined ||
+  it.Saleprice === null ||
+  String(it.Saleprice).trim() === "";
+
+function StockCell({
+  item,
+  onSave,
+}: {
+  item: Item;
+  onSave: (code: string, inventory: number) => Promise<void>;
+}) {
+  const [val, setVal] = useState<string>(String(item.Inventory ?? 0));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setVal(String(item.Inventory ?? 0));
+  }, [item.Inventory, item.Code, item.MMScode]);
+
+  const commit = async () => {
+    const next = toInventory(val);
+    if (next === Number(item.Inventory ?? 0)) {
+      setVal(String(item.Inventory ?? 0));
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await onSave(String(item.Code ?? ""), next);
+    } catch (e: any) {
+      alert(e?.message || "Failed to update inventory.");
+      setVal(String(item.Inventory ?? 0));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <input
+      type="number"
+      min={0}
+      value={val}
+      disabled={saving}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+      style={{
+        width: 80,
+        height: 32,
+        padding: "0 8px",
+        border: "1px solid #ccc",
+        borderRadius: 6,
+        fontSize: 14,
+      }}
+    />
+  );
+}
 
 export default function Store({
   items = [],
@@ -29,10 +135,14 @@ export default function Store({
   handleFileUpload,
   onCreateItem,
   onUpdateItem,
+  onUpdateInventory,
   onDeleteItem,
   onBulkCreateItems,
+  onUploadStock,
 }: StoreProps) {
   const [query, setQuery] = useState("");
+  const [stockBusy, setStockBusy] = useState(false);
+  const [stockNotice, setStockNotice] = useState<string | null>(null);
 
   const emptyForm = {
     Code: "",
@@ -40,6 +150,7 @@ export default function Store({
     Title: "",
     Saleprice: "",
     Type: "",
+    Inventory: "",
   };
 
   const [isOpen, setIsOpen] = useState(false);
@@ -77,31 +188,38 @@ export default function Store({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return items;
 
-    return items.filter((it) => {
-      const code = String(it.Code ?? "").toLowerCase();
-      const mms = String(it.MMScode ?? "").toLowerCase();
-      const title = String(it.Title ?? "").toLowerCase();
-      const type = String(it.Type ?? "").toLowerCase();
+    const list = q
+      ? items.filter((it) => {
+          const code = String(it.Code ?? "").toLowerCase();
+          const mms = String(it.MMScode ?? "").toLowerCase();
+          const title = String(it.Title ?? "").toLowerCase();
+          const type = String(it.Type ?? "").toLowerCase();
 
-      return (
-        code.includes(q) ||
-        mms.includes(q) ||
-        title.includes(q) ||
-        type.includes(q)
-      );
-    });
+          return (
+            code.includes(q) ||
+            mms.includes(q) ||
+            title.includes(q) ||
+            type.includes(q)
+          );
+        })
+      : [...items];
+
+    // Items still missing a sale price float to the top.
+    return list.sort(
+      (a, b) => (needsPrice(a) ? 0 : 1) - (needsPrice(b) ? 0 : 1)
+    );
   }, [items, query]);
 
+  const missingPriceItems = useMemo(
+    () => items.filter((it) => needsPrice(it)),
+    [items]
+  );
+
   const downloadExcel = () => {
-    const headers: Array<"Code" | "MMScode" | "Title" | "Saleprice" | "Type"> = [
-      "Code",
-      "MMScode",
-      "Title",
-      "Saleprice",
-      "Type",
-    ];
+    const headers: Array<
+      "Code" | "MMScode" | "Title" | "Saleprice" | "Type" | "Inventory"
+    > = ["Code", "MMScode", "Title", "Saleprice", "Type", "Inventory"];
 
     const rows: Array<{
       Code: string;
@@ -109,12 +227,14 @@ export default function Store({
       Title: string;
       Saleprice: number | null;
       Type: string;
+      Inventory: number;
     }> = items.map((it) => ({
       Code: it.Code ?? "",
       MMScode: it.MMScode ?? "",
       Title: it.Title ?? "",
       Saleprice: parseMoney(it.Saleprice),
       Type: it.Type ?? "",
+      Inventory: toInventory(it.Inventory),
     }));
 
     const ws = XLSX.utils.aoa_to_sheet([headers]);
@@ -202,10 +322,37 @@ export default function Store({
     }
   };
 
+  const updateInventoryDefault = async (code: string, inventory: number) => {
+    const res = await fetch(`/api/items/${encodeURIComponent(code)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ Inventory: inventory }),
+    });
+    if (!res.ok) throw new Error(`Inventory update failed (${res.status})`);
+  };
+
+  const uploadStockDefault = async (rows: StockRow[]) => {
+    const res = await fetch(`/api/items/stock`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ rows }),
+    });
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error(data?.error || `Stock upload failed (${res.status})`);
+    }
+    return data as StockUploadResult;
+  };
+
   const createItem = onCreateItem || createItemDefault;
   const updateItem = onUpdateItem || updateItemDefault;
+  const updateInventory = onUpdateInventory || updateInventoryDefault;
   const deleteItem = onDeleteItem || deleteItemDefault;
   const bulkCreateItems = onBulkCreateItems || bulkCreateItemsDefault;
+  const uploadStock = onUploadStock || uploadStockDefault;
 
   const openAdd = () => {
     setMode("add");
@@ -222,6 +369,7 @@ export default function Store({
       Title: it.Title ?? "",
       Saleprice: it.Saleprice ?? "",
       Type: it.Type ?? "",
+      Inventory: it.Inventory ?? "",
     } as typeof emptyForm);
     setErr(null);
     setIsOpen(true);
@@ -255,6 +403,13 @@ export default function Store({
       return "Saleprice must be a number (or leave blank).";
     }
 
+    if (String(form.Inventory).trim() !== "") {
+      const n = Number(String(form.Inventory).trim());
+      if (!Number.isFinite(n) || n < 0) {
+        return "Inventory must be a non-negative number (or leave blank).";
+      }
+    }
+
     return null;
   };
 
@@ -279,6 +434,10 @@ export default function Store({
             ? null
             : parseMoney(form.Saleprice),
         Type: String(form.Type || "").trim(),
+        Inventory:
+          String(form.Inventory).trim() === ""
+            ? undefined
+            : toInventory(form.Inventory),
       };
 
       if (mode === "add") {
@@ -336,6 +495,7 @@ export default function Store({
             ? null
             : parseMoney(row.Saleprice),
         Type: String(row.Type ?? "").trim(),
+        Inventory: toInventory(row.Inventory ?? row.Stock ?? row.stock ?? 0),
       }));
 
       const existingKeySet = new Set(
@@ -420,6 +580,103 @@ export default function Store({
     }
   };
 
+  const handleStockUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setStockBusy(true);
+    setStockNotice(null);
+
+    const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+      const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+        header: 1,
+        raw: true,
+        defval: "",
+        blankrows: false,
+      });
+
+      let headerIdx = -1;
+      let colItemNo = -1;
+      let colItemName = -1;
+      let colQty = -1;
+
+      for (let r = 0; r < grid.length; r++) {
+        const row = (grid[r] || []).map(norm);
+        const iNo = row.indexOf("item no");
+        const iQty = row.indexOf("quantity");
+        if (iNo >= 0 && iQty >= 0) {
+          headerIdx = r;
+          colItemNo = iNo;
+          colQty = iQty;
+          colItemName = row.indexOf("item name");
+          break;
+        }
+      }
+
+      if (headerIdx < 0) {
+        throw new Error(
+          "Could not find 'Item No' and 'Quantity' columns in the file."
+        );
+      }
+
+      const rows: StockRow[] = [];
+
+      for (let r = headerIdx + 1; r < grid.length; r++) {
+        const row = grid[r] || [];
+        const itemNo = String(row[colItemNo] ?? "").trim();
+        const qty = Math.floor(
+          Number(String(row[colQty] ?? "").replace(/[^\d.-]/g, "")) || 0
+        );
+
+        if (!itemNo || qty <= 0) continue;
+
+        const itemName = colItemName >= 0 ? row[colItemName] : "";
+        const parsed = parseItemName(itemName, itemNo);
+
+        rows.push({
+          MMScode: itemNo,
+          qty,
+          Code: parsed.Code,
+          Title: parsed.Title,
+          Type: parsed.Type,
+        });
+      }
+
+      if (rows.length === 0) {
+        throw new Error("No valid stock rows found in the file.");
+      }
+
+      const result = await uploadStock(rows);
+      const updated = result?.updated ?? 0;
+      const created = result?.created ?? 0;
+      const needsPrice = result?.needsPrice ?? [];
+
+      let msg = `✅ Stock updated: ${updated} item(s) increased`;
+      if (created > 0) msg += `, ${created} new item(s) added`;
+      msg += ".";
+      if (needsPrice.length > 0) {
+        msg += ` ⚠️ Please add sale price for: ${needsPrice.join(", ")}`;
+      }
+
+      setStockNotice(msg);
+      alert(msg);
+      if (typeof onRefresh === "function") onRefresh();
+    } catch (error: any) {
+      alert(error?.message || "Failed to upload stock file.");
+    } finally {
+      setStockBusy(false);
+    }
+  };
+
   const openDeleteConfirm = (code?: string) => {
     if (!code) return;
     setConfirmCode(code);
@@ -485,6 +742,26 @@ export default function Store({
             onChange={handleImportWithComparison}
             title="Choose Excel file to import"
           />
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13,
+              fontWeight: 600,
+              color: "#0d6efd",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Stock In:
+            <input
+              type="file"
+              accept=".csv, .xlsx, .xls"
+              onChange={handleStockUpload}
+              disabled={stockBusy}
+              title="Upload stock receipt (Item No + Quantity)"
+            />
+          </label>
           {typeof onRefresh === "function" && (
             <button onClick={onRefresh} className="primary">
               Refresh Items
@@ -541,6 +818,50 @@ export default function Store({
         Items in store: {items.length} | Showing: {filtered.length}
       </div>
 
+      {missingPriceItems.length > 0 && (
+        <div
+          style={{
+            margin: "0 0 10px",
+            padding: "8px 12px",
+            borderRadius: 8,
+            background: "#fff3cd",
+            border: "1px solid #ffe69c",
+            color: "#664d03",
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          ⚠️ {missingPriceItems.length} item(s) need a sale price. Click “Set
+          price” in the Sale Price column to add it.
+        </div>
+      )}
+
+      {stockNotice && (
+        <div
+          style={{
+            margin: "0 0 10px",
+            padding: "10px 12px",
+            borderRadius: 8,
+            background: "#d1e7dd",
+            border: "1px solid #badbcc",
+            color: "#0f5132",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
+          <span style={{ fontSize: 13 }}>{stockNotice}</span>
+          <button
+            className="secondary"
+            style={{ padding: "2px 8px" }}
+            onClick={() => setStockNotice(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div
         style={{
           overflow: "auto",
@@ -557,6 +878,7 @@ export default function Store({
               textAlign: "center",
               zIndex: 1,
               background: "white",
+              color: "#000",
             }}
           >
             <tr>
@@ -565,6 +887,7 @@ export default function Store({
               <th style={th}>MMS Code</th>
               <th style={th}>Title</th>
               <th style={th}>Sale Price</th>
+              <th style={th}>Inventory</th>
               <th style={th}>Type</th>
               <th style={th}>Actions</th>
             </tr>
@@ -582,9 +905,32 @@ export default function Store({
                 <td style={td}>
                   {it.Saleprice !== undefined &&
                   it.Saleprice !== null &&
-                  String(it.Saleprice) !== ""
-                    ? `₹${Number(it.Saleprice).toFixed(2)}`
-                    : ""}
+                  String(it.Saleprice) !== "" ? (
+                    `₹${Number(it.Saleprice).toFixed(2)}`
+                  ) : (
+                    <button
+                      className="secondary"
+                      onClick={() => openEdit(it)}
+                      style={{
+                        backgroundColor: "#ff9800",
+                        color: "white",
+                        padding: "4px 8px",
+                        fontSize: 12,
+                      }}
+                      title="Add sale price"
+                    >
+                      Set price
+                    </button>
+                  )}
+                </td>
+                <td style={td}>
+                  <StockCell
+                    item={it}
+                    onSave={async (code, inventory) => {
+                      await updateInventory(code, inventory);
+                      if (typeof onRefresh === "function") onRefresh();
+                    }}
+                  />
                 </td>
                 <td style={td}>{it.Type}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
@@ -611,7 +957,7 @@ export default function Store({
             {filtered.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   style={{ ...td, textAlign: "center", padding: 24 }}
                 >
                   No items match your search.
@@ -697,6 +1043,20 @@ export default function Store({
                   placeholder="e.g. 199.99"
                   style={input}
                   inputMode="decimal"
+                />
+              </div>
+
+              <div style={row}>
+                <label style={label}>Inventory (stock)</label>
+                <input
+                  name="Inventory"
+                  value={form.Inventory}
+                  onChange={onFormChange}
+                  placeholder="e.g. 50"
+                  style={input}
+                  inputMode="numeric"
+                  min={0}
+                  type="number"
                 />
               </div>
 

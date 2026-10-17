@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth";
 import { normalizeBillPayload } from "@/lib/helpers";
 import Bill from "@/models/bill";
 import IdempotencyKey from "@/models/IdempotencyKey";
+import { applyInventoryDelta, billItemDeltas } from "@/lib/inventory";
 
 export async function POST(req) {
   try {
@@ -42,6 +43,12 @@ export async function POST(req) {
     }
 
     const bill = await Bill.create(payload);
+
+    try {
+      await applyInventoryDelta(billItemDeltas(bill.items, -1));
+    } catch (stockErr) {
+      console.error("Inventory decrement error:", stockErr);
+    }
 
     if (idemKey) {
       try {

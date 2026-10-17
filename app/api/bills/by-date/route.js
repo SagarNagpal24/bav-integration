@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import Bill from "@/models/bill";
+import { applyInventoryDelta, billItemDeltas } from "@/lib/inventory";
 
 export async function DELETE(req) {
   try {
@@ -23,7 +24,16 @@ export async function DELETE(req) {
       );
     }
 
+    const bills = await Bill.find({ date }).lean();
     const out = await Bill.deleteMany({ date });
+
+    try {
+      const items = bills.flatMap((b) => b.items || []);
+      await applyInventoryDelta(billItemDeltas(items, 1));
+    } catch (stockErr) {
+      console.error("Inventory restore error:", stockErr);
+    }
+
     return NextResponse.json({ deletedCount: out.deletedCount });
   } catch (e) {
     console.error("DELETE /api/bills/by-date error:", e);

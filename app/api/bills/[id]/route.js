@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import Bill from "@/models/bill";
+import { applyInventoryDelta, billItemDeltas } from "@/lib/inventory";
 
 export async function DELETE(req, { params }) {
   try {
@@ -18,6 +19,12 @@ export async function DELETE(req, { params }) {
 
     if (!out) {
       return NextResponse.json({ error: "Bill not found" }, { status: 404 });
+    }
+
+    try {
+      await applyInventoryDelta(billItemDeltas(out.items, 1));
+    } catch (stockErr) {
+      console.error("Inventory restore error:", stockErr);
     }
 
     return NextResponse.json({ ok: true });

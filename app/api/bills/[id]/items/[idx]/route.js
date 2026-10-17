@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import Bill from "@/models/bill";
+import { applyInventoryDelta, billItemDeltas } from "@/lib/inventory";
 
 export async function PATCH(req, { params }) {
   try {
@@ -25,11 +26,18 @@ export async function PATCH(req, { params }) {
       return NextResponse.json({ error: "Invalid item index" }, { status: 400 });
     }
 
+    const removed = bill.items[i];
     bill.items.splice(i, 1);
     bill.total = bill.items.reduce(
       (sum, it) => sum + (it.Saleprice || 0) * (it.qty || 0),
       0
     );
+
+    try {
+      await applyInventoryDelta(billItemDeltas([removed], 1));
+    } catch (stockErr) {
+      console.error("Inventory restore error:", stockErr);
+    }
 
     if (bill.items.length === 0) {
       await bill.deleteOne();

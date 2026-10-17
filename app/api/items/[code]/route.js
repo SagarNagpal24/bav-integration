@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import Item from "@/models/Item";
-import { normalizeItem } from "@/lib/helpers";
+import { normalizeItem, parseQty } from "@/lib/helpers";
 
 export async function GET(req, { params }) {
   try {
@@ -71,6 +71,56 @@ export async function PUT(req, { params }) {
     return NextResponse.json(doc);
   } catch (e) {
     console.error("PUT /api/items/[code] error:", e);
+    return NextResponse.json({ error: "Failed to update item" }, { status: 500 });
+  }
+}
+
+export async function PATCH(req, { params }) {
+  try {
+    await requireAuth();
+  } catch (e) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    await connectDB();
+
+    const code = String(params.code || "").trim();
+    if (!code) {
+      return NextResponse.json(
+        { error: "Code is required in URL" },
+        { status: 400 }
+      );
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const update = {};
+
+    if (Object.prototype.hasOwnProperty.call(body || {}, "Inventory")) {
+      const inv = parseQty(body.Inventory);
+      update.Inventory = inv === null ? 0 : inv;
+    }
+
+    if (Object.keys(update).length === 0) {
+      return NextResponse.json(
+        { error: "No valid fields to update" },
+        { status: 400 }
+      );
+    }
+
+    const doc = await Item.findOneAndUpdate(
+      { Code: code },
+      { $set: update },
+      { new: true }
+    ).lean();
+
+    if (!doc) {
+      return NextResponse.json({ error: "Item not found" }, { status: 404 });
+    }
+
+    return NextResponse.json(doc);
+  } catch (e) {
+    console.error("PATCH /api/items/[code] error:", e);
     return NextResponse.json({ error: "Failed to update item" }, { status: 500 });
   }
 }

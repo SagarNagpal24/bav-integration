@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import Bill from "@/models/bill";
+import { applyInventoryDelta } from "@/lib/inventory";
 
 export async function PATCH(req, { params }) {
   try {
@@ -29,6 +30,11 @@ export async function PATCH(req, { params }) {
 
     const n = Math.max(0, Math.floor(Number(qty)));
 
+    const target = bill.items[i];
+    const oldQty = Math.max(0, Math.floor(Number(target.qty) || 0));
+    const newQty = n <= 0 ? 0 : n;
+    const delta = oldQty - newQty;
+
     if (n <= 0) {
       bill.items.splice(i, 1);
     } else {
@@ -39,6 +45,12 @@ export async function PATCH(req, { params }) {
       (sum, it) => sum + (Number(it.Saleprice) || 0) * (Number(it.qty) || 0),
       0
     );
+
+    try {
+      await applyInventoryDelta([{ Code: target.Code, delta }]);
+    } catch (stockErr) {
+      console.error("Inventory adjust error:", stockErr);
+    }
 
     if (bill.items.length === 0) {
       await bill.deleteOne();

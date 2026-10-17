@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 
 type Item = {
@@ -26,6 +26,15 @@ type StockUploadResult = {
   needsPrice?: string[];
 };
 
+type CompareRow = {
+  itemNo: string;
+  name: string;
+  fileQty: number;
+  storeQty: number | null;
+  diff: number;
+  missing: boolean;
+};
+
 type StoreProps = {
   items?: Item[];
   onRefresh?: () => void;
@@ -37,6 +46,7 @@ type StoreProps = {
   onBulkCreateItems?: (payloads: Item[]) => Promise<void>;
   onUploadStock?: (rows: StockRow[]) => Promise<StockUploadResult>;
   readOnly?: boolean;
+  refreshing?: boolean;
 };
 
 const TYPE_OPTIONS = ["Book", "Audio", "Photo", "Calendar"];
@@ -82,6 +92,7 @@ function StockCell({
   item: Item;
   onSave: (code: string, inventory: number) => Promise<void>;
 }) {
+  const [editing, setEditing] = useState(false);
   const [val, setVal] = useState<string>(String(item.Inventory ?? 0));
   const [saving, setSaving] = useState(false);
 
@@ -89,44 +100,93 @@ function StockCell({
     setVal(String(item.Inventory ?? 0));
   }, [item.Inventory, item.Code, item.MMScode]);
 
+  const startEdit = () => {
+    setVal(String(item.Inventory ?? 0));
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setVal(String(item.Inventory ?? 0));
+    setEditing(false);
+  };
+
   const commit = async () => {
     const next = toInventory(val);
     if (next === Number(item.Inventory ?? 0)) {
-      setVal(String(item.Inventory ?? 0));
+      cancelEdit();
       return;
     }
 
     setSaving(true);
     try {
       await onSave(String(item.Code ?? ""), next);
+      setEditing(false);
     } catch (e: any) {
       alert(e?.message || "Failed to update inventory.");
       setVal(String(item.Inventory ?? 0));
+      setEditing(false);
     } finally {
       setSaving(false);
     }
   };
 
+  if (!editing) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        {Number(item.Inventory ?? 0)}
+        <button
+          className="secondary"
+          onClick={startEdit}
+          style={{ padding: "2px 8px", fontSize: 12 }}
+          title="Edit inventory"
+        >
+          Edit
+        </button>
+      </span>
+    );
+  }
+
   return (
-    <input
-      type="number"
-      min={0}
-      value={val}
-      disabled={saving}
-      onChange={(e) => setVal(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-      }}
-      style={{
-        width: 80,
-        height: 32,
-        padding: "0 8px",
-        border: "1px solid #ccc",
-        borderRadius: 6,
-        fontSize: 14,
-      }}
-    />
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <input
+        type="number"
+        min={0}
+        value={val}
+        disabled={saving}
+        autoFocus
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") cancelEdit();
+        }}
+        style={{
+          width: 80,
+          height: 32,
+          padding: "0 8px",
+          border: "1px solid #ccc",
+          borderRadius: 6,
+          fontSize: 14,
+        }}
+      />
+      <button
+        className="primary"
+        onClick={commit}
+        disabled={saving}
+        style={{ padding: "4px 10px", fontSize: 12 }}
+        title="Save inventory"
+      >
+        ✓
+      </button>
+      <button
+        className="secondary"
+        onClick={cancelEdit}
+        disabled={saving}
+        style={{ padding: "4px 10px", fontSize: 12 }}
+        title="Cancel"
+      >
+        ✕
+      </button>
+    </span>
   );
 }
 
@@ -141,10 +201,17 @@ export default function Store({
   onBulkCreateItems,
   onUploadStock,
   readOnly = false,
+  refreshing = false,
 }: StoreProps) {
   const [query, setQuery] = useState("");
   const [stockBusy, setStockBusy] = useState(false);
   const [stockNotice, setStockNotice] = useState<string | null>(null);
+
+  const [compareBusy, setCompareBusy] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [compareRows, setCompareRows] = useState<CompareRow[]>([]);
+  const [compareMessage, setCompareMessage] = useState<string | null>(null);
+  const compareInputRef = useRef<HTMLInputElement | null>(null);
 
   const emptyForm = {
     Code: "",
@@ -179,6 +246,17 @@ export default function Store({
   };
 
   const normalizeKeyPart = (v: unknown) => String(v ?? "").trim().toLowerCase();
+
+  const normalizeMms = (v: unknown) => normalizeKeyPart(v).replace(/\.0$/, "");
+
+  const storeByMms = useMemo(() => {
+    const map = new Map<string, Item>();
+    for (const it of items) {
+      const key = normalizeMms(it.MMScode);
+      if (key && !map.has(key)) map.set(key, it);
+    }
+    return map;
+  }, [items]);
 
   const getCompositeKey = (code: unknown, mms: unknown) =>
     `${normalizeKeyPart(mms)}|${normalizeKeyPart(code)}`;
@@ -679,6 +757,112 @@ export default function Store({
     }
   };
 
+  const handleCompareUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setCompareBusy(true);
+    setCompareMessage(null);
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+      const grid = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+        header: 1,
+        raw: true,
+        defval: "",
+        blankrows: false,
+      });
+
+      const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+
+      let headerIdx = -1;
+      let colItemNo = -1;
+      let colItemName = -1;
+      let colQty = -1;
+
+      for (let r = 0; r < grid.length; r++) {
+        const row = (grid[r] || []).map(norm);
+        const iNo = row.indexOf("item number");
+        const iQty = row.indexOf("opening qty");
+        if (iNo >= 0 && iQty >= 0) {
+          headerIdx = r;
+          colItemNo = iNo;
+          colQty = iQty;
+          colItemName = row.indexOf("item");
+          break;
+        }
+      }
+
+      if (headerIdx < 0) {
+        throw new Error(
+          "Could not find 'Item Number' and 'Opening Qty' columns in the file."
+        );
+      }
+
+      const rows: CompareRow[] = [];
+
+      for (let r = headerIdx + 1; r < grid.length; r++) {
+        const row = grid[r] || [];
+        const itemNo = String(row[colItemNo] ?? "").trim();
+        if (!itemNo) continue;
+        if (norm(itemNo).includes("summary")) continue;
+
+        const name =
+          colItemName >= 0 ? String(row[colItemName] ?? "").trim() : "";
+        const fileQty = Math.max(
+          0,
+          Math.floor(
+            Number(String(row[colQty] ?? "").replace(/[^\d.-]/g, "")) || 0
+          )
+        );
+
+        const storeItem = storeByMms.get(normalizeMms(itemNo));
+
+        if (!storeItem) {
+          rows.push({
+            itemNo,
+            name,
+            fileQty,
+            storeQty: null,
+            diff: fileQty,
+            missing: true,
+          });
+        } else {
+          const storeQty = Number(storeItem.Inventory ?? 0);
+          const diff = fileQty - storeQty;
+          if (diff !== 0) {
+            rows.push({
+              itemNo,
+              name: String(storeItem.Title ?? "") || name,
+              fileQty,
+              storeQty,
+              diff,
+              missing: false,
+            });
+          }
+        }
+      }
+
+      if (rows.length === 0) {
+        setCompareMessage("✅ No discrepancies found — file matches the store.");
+        setCompareRows([]);
+        setCompareOpen(true);
+        return;
+      }
+
+      setCompareRows(rows);
+      setCompareOpen(true);
+    } catch (error: any) {
+      alert(error?.message || "Failed to read compare file.");
+    } finally {
+      setCompareBusy(false);
+    }
+  };
+
   const openDeleteConfirm = (code?: string) => {
     if (!code) return;
     setConfirmCode(code);
@@ -718,11 +902,12 @@ export default function Store({
         if (isOpen) closeModal();
         if (confirmOpen) closeDeleteConfirm();
         if (importConfirmOpen) closeImportConfirm();
+        if (compareOpen) setCompareOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, confirmOpen, importConfirmOpen, busy, importBusy]);
+  }, [isOpen, confirmOpen, importConfirmOpen, compareOpen, busy, importBusy]);
 
   return (
     <div className="container">
@@ -771,10 +956,30 @@ export default function Store({
             </>
           )}
           {typeof onRefresh === "function" && (
-            <button onClick={onRefresh} className="primary">
-              Refresh Items
+            <button
+              onClick={onRefresh}
+              className="primary"
+              disabled={refreshing}
+            >
+              {refreshing ? "Refreshing…" : "Refresh Items"}
             </button>
           )}
+          <input
+            ref={compareInputRef}
+            type="file"
+            accept=".csv, .xlsx, .xls"
+            style={{ display: "none" }}
+            onChange={handleCompareUpload}
+          />
+          <button
+            onClick={() => compareInputRef.current?.click()}
+            className="secondary"
+            style={{ backgroundColor: "#7b1fa2", color: "white" }}
+            disabled={compareBusy}
+            title="Compare stock report (Item Number + Opening Qty) with store inventory"
+          >
+            {compareBusy ? "Comparing…" : "Compare File"}
+          </button>
           <button
             onClick={downloadExcel}
             className="secondary"
@@ -1316,6 +1521,110 @@ export default function Store({
           </div>
         </div>
       )}
+
+      {compareOpen && (
+        <div style={backdropStyle} onMouseDown={() => setCompareOpen(false)}>
+          <div
+            style={{ ...confirmModalStyle, width: "min(860px, 100%)" }}
+            onMouseDown={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <h4 style={{ margin: 0 }}>Store vs File — Discrepancies</h4>
+
+            {compareMessage && (
+              <p style={{ ...confirmText, marginTop: 12 }}>{compareMessage}</p>
+            )}
+
+            <p style={{ ...confirmText, marginTop: 12 }}>
+              Compared <strong>Item Number (file) ↔ MMS Code (store)</strong> and
+              <strong> Opening Qty (file) ↔ Inventory (store)</strong>.
+              {compareRows.length > 0 && (
+                <>
+                  <br />
+                  <strong>{compareRows.length}</strong> discrepancy row(s)
+                  found.
+                </>
+              )}
+            </p>
+
+            {compareRows.length > 0 && (
+              <div
+                style={{
+                  marginTop: 12,
+                  maxHeight: 420,
+                  overflow: "auto",
+                  border: "1px solid #eee",
+                  borderRadius: 8,
+                }}
+              >
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={th2}>Item No</th>
+                      <th style={th2}>Name</th>
+                      <th style={th2}>File Qty</th>
+                      <th style={th2}>Store Qty</th>
+                      <th style={th2}>Diff</th>
+                      <th style={th2}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {compareRows.map((r, idx) => (
+                      <tr key={`${r.itemNo}-${idx}`}>
+                        <td style={tdMono}>{r.itemNo}</td>
+                        <td style={td}>{r.name}</td>
+                        <td style={{ ...td, textAlign: "right" }}>{r.fileQty}</td>
+                        <td style={{ ...td, textAlign: "right" }}>
+                          {r.storeQty ?? "—"}
+                        </td>
+                        <td
+                          style={{
+                            ...td,
+                            textAlign: "right",
+                            fontWeight: 700,
+                            color: r.missing ? "#b00020" : "#e65100",
+                          }}
+                        >
+                          {r.missing ? "—" : r.diff > 0 ? `+${r.diff}` : r.diff}
+                        </td>
+                        <td style={{ ...td, whiteSpace: "nowrap" }}>
+                          {r.missing ? (
+                            <span style={{ color: "#b00020", fontWeight: 600 }}>
+                              Not in store
+                            </span>
+                          ) : (
+                            <span style={{ color: "#e65100", fontWeight: 600 }}>
+                              Qty mismatch
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                marginTop: 14,
+              }}
+            >
+              <button
+                type="button"
+                className="primary"
+                onClick={() => setCompareOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1327,6 +1636,15 @@ const th: React.CSSProperties = {
   fontWeight: 700,
   fontSize: 14,
   whiteSpace: "nowrap",
+};
+
+const th2: React.CSSProperties = {
+  ...th,
+  padding: "8px 10px",
+  fontSize: 13,
+  position: "sticky",
+  top: 0,
+  background: "white",
 };
 
 const td: React.CSSProperties = {

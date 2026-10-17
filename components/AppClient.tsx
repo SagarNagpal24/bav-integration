@@ -45,10 +45,14 @@ function BillingApp({
   const genIdemKey = () =>
     crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 
+  const [itemsLoading, setItemsLoading] = useState(false);
+
   const fetchItems = useCallback(async () => {
+    setItemsLoading(true);
     try {
       const res = await fetch(`/api/items`, {
         credentials: "include",
+        cache: "no-store",
       });
 
       if (res.status === 401) {
@@ -61,6 +65,8 @@ function BillingApp({
     } catch (err) {
       console.error(err);
       setAlertMsg("❌ Failed to load items from server");
+    } finally {
+      setItemsLoading(false);
     }
   }, []);
 
@@ -88,6 +94,12 @@ function BillingApp({
     fetchItems();
     fetchTodayTotal();
   }, [fetchItems, fetchTodayTotal]);
+
+  useEffect(() => {
+    if (view === "store") {
+      fetchItems();
+    }
+  }, [view, fetchItems]);
 
   useEffect(() => {
     if (!alertMsg) return;
@@ -392,7 +404,7 @@ function BillingApp({
       setHighlightIndex(-1);
       setCodeInput("");
       setAlertMsg("✅ Bill saved to database & cart cleared!");
-      await fetchTodayTotal();
+      await Promise.all([fetchTodayTotal(), fetchItems()]);
       inputRef.current?.focus();
     } catch (err) {
       console.error(err);
@@ -401,7 +413,7 @@ function BillingApp({
       isSavingRef.current = false;
       setIsSaving(false);
     }
-  }, [cart, total, fetchTodayTotal]);
+  }, [cart, total, fetchTodayTotal, fetchItems]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -666,6 +678,7 @@ function BillingApp({
         <Store
           items={items}
           onRefresh={fetchItems}
+          refreshing={itemsLoading}
           handleFileUpload={handleFileUpload}
           readOnly={user?.role !== "admin"}
         />

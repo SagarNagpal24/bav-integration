@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import * as XLSX from "xlsx";
 import Cart, { type CartItem } from "./Cart";
 import Navbar, { type User } from "./Navbar";
@@ -276,6 +282,13 @@ function BillingApp({
   const removeFromCart = (code: string) =>
     setCart(cart.filter((c) => c.Code !== code));
 
+  const hasPrice = (it: Item) =>
+    it.Saleprice !== undefined &&
+    it.Saleprice !== null &&
+    String(it.Saleprice).trim() !== "";
+
+  const billingItems = useMemo(() => items.filter(hasPrice), [items]);
+
   const runSuggestions = useCallback(
     (input: string) => {
       if (!input.trim()) {
@@ -286,7 +299,7 @@ function BillingApp({
 
       const search = input.toLowerCase();
 
-      const matches = items.filter((it) => {
+      const matches = billingItems.filter((it) => {
         const code = String(it.Code || "").toLowerCase();
         const mms = String(it.MMScode || "").toLowerCase();
         const title = String(it.Title || "").toLowerCase();
@@ -300,7 +313,7 @@ function BillingApp({
       setSuggestions(matches.slice(0, 8));
       setHighlightIndex(-1);
     },
-    [items]
+    [billingItems]
   );
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -345,7 +358,7 @@ function BillingApp({
       return;
     }
 
-    const found = items.find((it) => {
+    const found = billingItems.find((it) => {
       const code = String(it.Code || "").toLowerCase();
       const mms = String(it.MMScode || "").toLowerCase();
       const title = String(it.Title || "").toLowerCase();
@@ -357,10 +370,25 @@ function BillingApp({
     } else if (suggestions.length > 0) {
       addToCart(suggestions[0]);
     } else {
-      setAlertMsg("❌ Item not found!");
+      setAlertMsg(
+        billingItemsHasCode(input)
+          ? "⚠️ Item has no sale price yet. Add a price in the Store tab first."
+          : "❌ Item not found!"
+      );
       inputRef.current?.focus();
     }
   };
+
+  const billingItemsHasCode = (input: string) =>
+    items.some((it) => {
+      const code = String(it.Code || "").toLowerCase();
+      const mms = String(it.MMScode || "").toLowerCase();
+      const title = String(it.Title || "").toLowerCase();
+      const foundHasPrice = hasPrice(it);
+      return (
+        (code === input || mms === input || title === input) && !foundHasPrice
+      );
+    });
 
   const total = cart.reduce(
     (sum, i) => sum + (i.Saleprice || 0) * i.qty,

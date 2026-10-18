@@ -7,7 +7,6 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import * as XLSX from "xlsx";
 import Cart, { type CartItem } from "./Cart";
 import Navbar, { type User } from "./Navbar";
 import Report from "./Report";
@@ -135,117 +134,6 @@ function BillingApp({
     setConfirmOpen(false);
     inputRef.current?.focus();
   }, []);
-
-  const handleFileUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const readFile = (f: File) =>
-      new Promise<ArrayBuffer>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as ArrayBuffer);
-        reader.onerror = reject;
-        reader.readAsArrayBuffer(f);
-      });
-
-    const parseMoney = (v: unknown) => {
-      if (v === null || v === undefined) return 0;
-      const n = parseFloat(String(v).replace(/[^\d.-]/g, "").trim());
-      return Number.isFinite(n) ? n : 0;
-    };
-
-    try {
-      const ab = await readFile(file);
-      const wb = XLSX.read(ab, { type: "array", cellDates: true });
-      const wsname = wb.SheetNames[0];
-      const ws = wb.Sheets[wsname];
-
-      let rows = XLSX.utils.sheet_to_json(ws, {
-        defval: "",
-        raw: true,
-        blankrows: false,
-      }) as Record<string, any>[];
-
-      if (!Array.isArray(rows) || rows.length === 0) {
-        setAlertMsg("⚠️ No rows found in sheet.");
-        return;
-      }
-
-      const normalizeKey = (k: string) =>
-        String(k).trim().replace(/\s+/g, " ").toLowerCase();
-
-      rows = rows.map((r) => {
-        const norm: Record<string, any> = {};
-        for (const [k, v] of Object.entries(r)) {
-          norm[normalizeKey(k)] = v;
-        }
-        return norm;
-      });
-
-      const cleaned: Item[] = rows
-        .map((r) => {
-          const priceRaw =
-            r["saleprice"] ??
-            r["sale price"] ??
-            r["sale_price"] ??
-            r["selling price"] ??
-            r["selling_price"] ??
-            r["price"] ??
-            r["mrp"] ??
-            r["rate"] ??
-            r["amount"];
-
-          const invRaw =
-            r["inventory"] ?? r["stock"] ?? r["stock qty"] ?? r["quantity"] ?? r["qty"];
-
-          return {
-            Code: r["code"] || r["item code"] || r["barcode"] || "",
-            MMScode: r["mms code"] || r["mmscode"] || r["mms"] || "",
-            Title: r["title"] || r["name"] || r["item name"] || "",
-            Saleprice: parseMoney(priceRaw),
-            Type: r["type"] || r["category"] || "",
-            Inventory:
-              invRaw === undefined || String(invRaw).trim() === ""
-                ? undefined
-                : Math.max(0, Math.floor(parseMoney(invRaw))),
-          };
-        })
-        .filter((r) => String(r.Code).trim() || String(r.Title).trim());
-
-      if (cleaned.length === 0) {
-        setAlertMsg("⚠️ No valid rows after cleaning (missing Code/Title?).");
-        return;
-      }
-
-      setItems(cleaned);
-
-      const chunkSize = 500;
-      for (let i = 0; i < cleaned.length; i += chunkSize) {
-        const slice = cleaned.slice(i, i + chunkSize);
-        const resp = await fetch(`/api/items/bulk`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ items: slice }),
-        });
-
-        if (!resp.ok) {
-          const text = await resp.text().catch(() => "");
-          throw new Error(
-            `Bulk upsert failed at rows ${i}-${i + slice.length - 1}. ${text}`
-          );
-        }
-      }
-
-      await fetchItems();
-      setAlertMsg("✅ Items uploaded to database");
-    } catch (err) {
-      console.error(err);
-      setAlertMsg("❌ Failed to import Excel to database");
-    }
-  };
 
   const addToCart = (item: Item) => {
     const existing = cart.find((c) => c.Code === item.Code);
@@ -707,7 +595,6 @@ function BillingApp({
           items={items}
           onRefresh={fetchItems}
           refreshing={itemsLoading}
-          handleFileUpload={handleFileUpload}
           readOnly={user?.role !== "admin"}
         />
       ) : null}

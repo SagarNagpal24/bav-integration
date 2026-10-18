@@ -38,7 +38,6 @@ type CompareRow = {
 type StoreProps = {
   items?: Item[];
   onRefresh?: () => void;
-  handleFileUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onCreateItem?: (payload: Item) => Promise<void>;
   onUpdateItem?: (code: string, payload: Item) => Promise<void>;
   onUpdateInventory?: (code: string, inventory: number) => Promise<void>;
@@ -193,7 +192,6 @@ function StockCell({
 export default function Store({
   items = [],
   onRefresh,
-  handleFileUpload,
   onCreateItem,
   onUpdateItem,
   onUpdateInventory,
@@ -234,7 +232,8 @@ export default function Store({
   const [importConfirmOpen, setImportConfirmOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [newImportItems, setNewImportItems] = useState<Item[]>([]);
-  const [existingImportItems, setExistingImportItems] = useState<Item[]>([]);
+  const [importUpdateItems, setImportUpdateItems] = useState<Item[]>([]);
+  const [importUnchangedItems, setImportUnchangedItems] = useState<Item[]>([]);
   const [importDuplicatesInFile, setImportDuplicatesInFile] = useState<Item[]>([]);
   const [importMessage, setImportMessage] = useState<string | null>(null);
 
@@ -248,6 +247,20 @@ export default function Store({
   const normalizeKeyPart = (v: unknown) => String(v ?? "").trim().toLowerCase();
 
   const normalizeMms = (v: unknown) => normalizeKeyPart(v).replace(/\.0$/, "");
+
+  const itemChanged = (prev: Item, next: Item) => {
+    const samePrice =
+      (parseMoney(prev.Saleprice) ?? null) ===
+      (parseMoney(next.Saleprice) ?? null);
+    const sameInventory =
+      toInventory(prev.Inventory) === toInventory(next.Inventory);
+    const sameTitle =
+      String(prev.Title ?? "").trim() === String(next.Title ?? "").trim();
+    const sameType =
+      String(prev.Type ?? "").trim() === String(next.Type ?? "").trim();
+
+    return !(samePrice && sameInventory && sameTitle && sameType);
+  };
 
   const storeByMms = useMemo(() => {
     const map = new Map<string, Item>();
@@ -265,6 +278,15 @@ export default function Store({
     () => new Set(items.map((it) => getCompositeKey(it.Code, it.MMScode))),
     [items]
   );
+
+  const storeByComposite = useMemo(() => {
+    const map = new Map<string, Item>();
+    for (const it of items) {
+      const key = getCompositeKey(it.Code, it.MMScode);
+      if (!map.has(key)) map.set(key, it);
+    }
+    return map;
+  }, [items]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -544,14 +566,6 @@ export default function Store({
       const file = e.target.files?.[0];
       if (!file) return;
 
-      if (typeof handleFileUpload === "function") {
-        try {
-          handleFileUpload(e);
-        } catch {
-          // keep old prop optional and non-blocking
-        }
-      }
-
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, { type: "array" });
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -578,13 +592,10 @@ export default function Store({
         Inventory: toInventory(row.Inventory ?? row.Stock ?? row.stock ?? 0),
       }));
 
-      const existingKeySet = new Set(
-        items.map((it) => getCompositeKey(it.Code, it.MMScode))
-      );
-
       const seenUploadKeys = new Set<string>();
       const newItems: Item[] = [];
-      const existingItems: Item[] = [];
+      const updateItems: Item[] = [];
+      const unchangedItems: Item[] = [];
       const duplicateItemsInFile: Item[] = [];
 
       for (const row of parsedRows) {
@@ -602,20 +613,25 @@ export default function Store({
 
         seenUploadKeys.add(key);
 
-        if (existingKeySet.has(key)) {
-          existingItems.push(row);
-        } else {
+        const existing = storeByComposite.get(key);
+
+        if (!existing) {
           newItems.push(row);
+        } else if (itemChanged(existing, row)) {
+          updateItems.push(row);
+        } else {
+          unchangedItems.push(row);
         }
       }
 
-      setExistingImportItems(existingItems);
       setNewImportItems(newItems);
+      setImportUpdateItems(updateItems);
+      setImportUnchangedItems(unchangedItems);
       setImportDuplicatesInFile(duplicateItemsInFile);
 
-      if (newItems.length === 0) {
+      if (newItems.length === 0 && updateItems.length === 0) {
         alert(
-          `All uploaded items already exist in the database. Existing matches: ${existingItems.length}`
+          `Nothing to update — all ${unchangedItems.length} item(s) in the file already match the store.`
         );
         e.target.value = "";
         return;
@@ -633,26 +649,37 @@ export default function Store({
     if (!importBusy) {
       setImportConfirmOpen(false);
       setNewImportItems([]);
-      setExistingImportItems([]);
+      setImportUpdateItems([]);
+      setImportUnchangedItems([]);
       setImportDuplicatesInFile([]);
       setImportMessage(null);
     }
   };
 
-  const confirmImportNewItems = async () => {
-    if (!newImportItems.length) return;
+  const confirmImportItems = async () => {
+    const toSave = [...newImportItems, ...importUpdateItems];
+    if (!toSave.length) return;
 
     setImportBusy(true);
     setImportMessage(null);
 
     try {
-      await bulkCreateItems(newImportItems);
+      await bulkCreateItems(toSave);
+
+      const added = newImportItems.length;
+      const updated = importUpdateItems.length;
+
       setImportConfirmOpen(false);
       setNewImportItems([]);
-      setExistingImportItems([]);
+      setImportUpdateItems([]);
+      setImportUnchangedItems([]);
       setImportDuplicatesInFile([]);
       if (typeof onRefresh === "function") onRefresh();
-      alert(`${newImportItems.length} new item(s) added successfully.`);
+
+      const parts: string[] = [];
+      if (added) parts.push(`${added} added`);
+      if (updated) parts.push(`${updated} updated`);
+      alert(`✅ Import complete: ${parts.join(", ")}.`);
     } catch (error: any) {
       setImportMessage(error?.message || "Import failed.");
     } finally {
@@ -927,12 +954,25 @@ export default function Store({
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {!readOnly && (
             <>
-              <input
-                type="file"
-                accept=".xlsx, .xls"
-                onChange={handleImportWithComparison}
-                title="Choose Excel file to import"
-              />
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: "#0d6efd",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Import / Update:
+                <input
+                  type="file"
+                  accept=".xlsx, .xls"
+                  onChange={handleImportWithComparison}
+                  title="Re-upload the downloaded Store items file to add new items or update prices and stock"
+                />
+              </label>
               <label
                 style={{
                   display: "inline-flex",
@@ -1397,25 +1437,34 @@ export default function Store({
             role="dialog"
             aria-modal="true"
           >
-            <h4 style={{ margin: 0 }}>Import Store Items</h4>
+            <h4 style={{ margin: 0 }}>Import / Update Store Items</h4>
 
             <p style={{ ...confirmText, marginTop: 12 }}>
-              <strong>{existingImportItems.length}</strong> item(s) already exist
-              in the database based on <strong>MMScode + Code</strong>.
+              Based on <strong>MMScode + Code</strong>:
               <br />
-              <strong>{newImportItems.length}</strong> item(s) are new.
+              <strong>{newImportItems.length}</strong> new item(s) will be added.
+              <br />
+              <strong>{importUpdateItems.length}</strong> existing item(s) will be
+              updated (price / stock / title / type).
+              {importUnchangedItems.length > 0 && (
+                <>
+                  <br />
+                  <strong>{importUnchangedItems.length}</strong> item(s) are
+                  unchanged and will be skipped.
+                </>
+              )}
               {importDuplicatesInFile.length > 0 && (
                 <>
                   <br />
                   <strong>{importDuplicatesInFile.length}</strong> duplicate row(s)
-                  were also found inside the uploaded file and will be skipped.
+                  inside the file will be skipped.
                 </>
               )}
               <br />
-              Do you want to add only the new items?
+              Do you want to apply these changes?
             </p>
 
-            {existingImportItems.length > 0 && (
+            {importUpdateItems.length > 0 && (
               <div
                 style={{
                   marginTop: 12,
@@ -1428,11 +1477,12 @@ export default function Store({
                 }}
               >
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                  Already existing items
+                  Existing items to be updated
                 </div>
-                {existingImportItems.map((it, idx) => (
-                  <div key={`existing-${it.MMScode}-${it.Code}-${idx}`}>
-                    {it.MMScode} | {it.Code} | {it.Title}
+                {importUpdateItems.map((it, idx) => (
+                  <div key={`update-${it.MMScode}-${it.Code}-${idx}`}>
+                    {it.MMScode} | {it.Code} | {it.Title} | ₹{it.Saleprice ?? 0} |
+                    qty {it.Inventory ?? 0}
                   </div>
                 ))}
               </div>
@@ -1509,13 +1559,16 @@ export default function Store({
               <button
                 type="button"
                 className="primary"
-                onClick={confirmImportNewItems}
-                disabled={importBusy || newImportItems.length === 0}
+                onClick={confirmImportItems}
+                disabled={
+                  importBusy ||
+                  newImportItems.length + importUpdateItems.length === 0
+                }
                 style={{ backgroundColor: "#0d6efd", color: "white" }}
               >
                 {importBusy
-                  ? "Importing..."
-                  : `Add ${newImportItems.length} New Item(s)`}
+                  ? "Saving..."
+                  : `Apply (${newImportItems.length + importUpdateItems.length})`}
               </button>
             </div>
           </div>

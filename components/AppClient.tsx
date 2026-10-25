@@ -283,6 +283,8 @@ function BillingApp({
     0
   );
 
+  const totalQty = cart.reduce((sum, i) => sum + Number(i.qty || 0), 0);
+
   const saveBill = useCallback(async () => {
     if (cart.length === 0) {
       setAlertMsg("⚠️ Cart is empty, nothing to save.");
@@ -584,7 +586,12 @@ function BillingApp({
   />
 </div>
 
-          <h2 className="total">Total Bill: ₹{total.toFixed(2)}</h2>
+          <h2 className="total">
+            Total Bill: ₹{total.toFixed(2)}
+            <span style={{ marginLeft: 16, fontSize: "0.7em", color: "#555" }}>
+              (Total Qty: {totalQty})
+            </span>
+          </h2>
         </div>
       ) : view === "report" ? (
         <Report onSalesChanged={fetchTodayTotal} userRole={user?.role} />

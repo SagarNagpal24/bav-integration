@@ -138,6 +138,14 @@ function BillingApp({
     inputRef.current?.focus();
   }, []);
 
+  const stockByCode = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const it of items) {
+      map.set(String(it.Code), Number(it.Inventory ?? 0));
+    }
+    return map;
+  }, [items]);
+
   const addToCart = (item: Item) => {
     const stock = Number(item.Inventory ?? 0);
 
@@ -154,6 +162,16 @@ function BillingApp({
     const existing = cart.find((c) => c.Code === item.Code);
 
     if (existing) {
+      if (existing.qty + 1 > stock) {
+        setAlertMsg(
+          `❌ Inventory is not sufficient to order for the given item. ${item.Code} — available: ${stock}, in cart: ${existing.qty}.`
+        );
+        setSuggestions([]);
+        setHighlightIndex(-1);
+        inputRef.current?.focus();
+        return;
+      }
+
       setCart(
         cart.map((c) =>
           c.Code === item.Code ? { ...c, qty: c.qty + 1 } : c
@@ -177,10 +195,19 @@ function BillingApp({
     inputRef.current?.focus();
   };
 
-  const updateQty = (code: string, qty: number) =>
-    setCart(
-      cart.map((c) => (c.Code === code ? { ...c, qty: qty || 1 } : c))
-    );
+  const updateQty = (code: string, qty: number) => {
+    const next = Math.max(1, Math.floor(Number(qty) || 1));
+    const stock = stockByCode.get(String(code));
+
+    if (stock !== undefined && next > stock) {
+      setAlertMsg(
+        `❌ Inventory is not sufficient to order for the given item. ${code} — available: ${stock}, requested: ${next}.`
+      );
+      return;
+    }
+
+    setCart(cart.map((c) => (c.Code === code ? { ...c, qty: next } : c)));
+  };
 
   const removeFromCart = (code: string) =>
     setCart(cart.filter((c) => c.Code !== code));
@@ -307,6 +334,19 @@ function BillingApp({
       return;
     }
 
+    const insufficient = cart.find((c) => {
+      const stock = stockByCode.get(String(c.Code));
+      return stock !== undefined && Number(c.qty) > stock;
+    });
+
+    if (insufficient) {
+      setAlertMsg(
+        `❌ Inventory is not sufficient to order for the given item. ${insufficient.Code} — available: ${stockByCode.get(String(insufficient.Code))}, requested: ${insufficient.qty}.`
+      );
+      inputRef.current?.focus();
+      return;
+    }
+
     if (isSavingRef.current) {
       setAlertMsg("⌛ Already saving this bill...");
       return;
@@ -346,7 +386,7 @@ function BillingApp({
       isSavingRef.current = false;
       setIsSaving(false);
     }
-  }, [cart, total, saleCounter, fetchTodayTotal, fetchItems]);
+  }, [cart, total, saleCounter, stockByCode, fetchTodayTotal, fetchItems]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

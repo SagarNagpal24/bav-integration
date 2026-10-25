@@ -427,6 +427,7 @@ export default function Report({ onSalesChanged, userRole }: ReportProps) {
           Type: string;
           __sumQty: number;
           __sumAmount: number;
+          __dates: Set<string>;
         }
       >();
 
@@ -444,6 +445,7 @@ export default function Report({ onSalesChanged, userRole }: ReportProps) {
             Type: it.Type || "",
             __sumQty: 0,
             __sumAmount: 0,
+            __dates: new Set<string>(),
           };
 
           prev.MMScode = it.MMScode || prev.MMScode;
@@ -452,6 +454,7 @@ export default function Report({ onSalesChanged, userRole }: ReportProps) {
           prev.Type = it.Type || prev.Type;
           prev.__sumQty += qty;
           prev.__sumAmount += lineAmount;
+          if (bill.date) prev.__dates.add(String(bill.date));
 
           map.set(key, prev);
         });
@@ -464,6 +467,7 @@ export default function Report({ onSalesChanged, userRole }: ReportProps) {
           Code: r.Code,
           Title: r.Title,
           Type: r.Type,
+          DateOfSale: Array.from(r.__dates).sort().join(", "),
           SalePrice: Number((r.__sumAmount / r.__sumQty).toFixed(2)),
           TotalQty: r.__sumQty,
           TotalAmount: Number(r.__sumAmount.toFixed(2)),

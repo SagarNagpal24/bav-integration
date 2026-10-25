@@ -31,7 +31,19 @@ export async function POST(req) {
 
     const body = await req.json();
     const payload = normalizeBillPayload(body || {});
-    payload.counter = user?.role || "shop";
+
+    // Shop/Stall users are pinned to their own counter. Admins may bill on
+    // behalf of either counter (Shop POS / Stall POS) by sending `counter`.
+    const role = user?.role;
+    if (role === "shop" || role === "stall") {
+      payload.counter = role;
+    } else {
+      const requested = String(payload.counter || "").toLowerCase();
+      payload.counter = ["shop", "stall"].includes(requested)
+        ? requested
+        : role || "shop";
+    }
+
     const { date, items, total } = payload;
 
     if (!date || !Array.isArray(items) || items.length === 0 || typeof total !== "number") {

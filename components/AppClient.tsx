@@ -38,6 +38,9 @@ function BillingApp({
   const [suggestions, setSuggestions] = useState<Item[]>([]);
   const [highlightIndex, setHighlightIndex] = useState(-1);
   const [todayTotal, setTodayTotal] = useState(0);
+  const [saleCounter, setSaleCounter] = useState<"shop" | "stall">(
+    user?.role === "stall" ? "stall" : "shop"
+  );
 
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -301,7 +304,7 @@ function BillingApp({
     setIsSaving(true);
 
     const today = new Date().toISOString().split("T")[0];
-    const bill = { date: today, items: cart, total };
+    const bill = { date: today, items: cart, total, counter: saleCounter };
     const idempotencyKey = genIdemKey();
 
     try {
@@ -331,7 +334,7 @@ function BillingApp({
       isSavingRef.current = false;
       setIsSaving(false);
     }
-  }, [cart, total, fetchTodayTotal, fetchItems]);
+  }, [cart, total, saleCounter, fetchTodayTotal, fetchItems]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -552,6 +555,36 @@ function BillingApp({
             </div>
 
             <div className="top-bar-right">
+              {user?.role === "admin" && (
+                <label
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    marginRight: 8,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <b>Counter:</b>
+                  <select
+                    value={saleCounter}
+                    onChange={(e) =>
+                      setSaleCounter(e.target.value as "shop" | "stall")
+                    }
+                    style={{
+                      height: 36,
+                      borderRadius: 4,
+                      border: "1px solid #ccc",
+                      padding: "0 8px",
+                    }}
+                    title="Select which counter this sale belongs to"
+                  >
+                    <option value="shop">Shop POS</option>
+                    <option value="stall">Stall POS</option>
+                  </select>
+                </label>
+              )}
+
               <button
                 onClick={saveBill}
                 className="secondary"

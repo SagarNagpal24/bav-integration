@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { normalizeType } from "@/lib/helpers";
 
 type BillItem = {
   Type?: string;
@@ -74,12 +75,15 @@ export default function Summary({ userRole }: SummaryProps) {
   const counterQuery = counter !== "all" ? `&counter=${counter}` : "";
 
   const summary: Record<string, CategorySummary> = {};
+  const categoryLabels: Record<string, string> = {};
 
   bills.forEach((bill) => {
     (bill.items || []).forEach((item) => {
-      const category = item.Type || "Other";
+      const label = normalizeType(item.Type) || "Other";
+      const category = label.toLowerCase();
       if (!summary[category]) {
         summary[category] = { qty: 0, amount: 0 };
+        categoryLabels[category] = label;
       }
       summary[category].qty += Number(item.qty || 0);
       summary[category].amount +=
@@ -195,7 +199,7 @@ export default function Summary({ userRole }: SummaryProps) {
           <tbody>
             {Object.keys(summary).map((cat, idx) => (
               <tr key={idx}>
-                <td>{cat}</td>
+                <td>{categoryLabels[cat]}</td>
                 <td>{summary[cat].qty}</td>
                 <td>₹{summary[cat].amount.toFixed(2)}</td>
               </tr>

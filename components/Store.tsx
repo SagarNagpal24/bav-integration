@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
+import { normalizeType } from "@/lib/helpers";
 
 type Item = {
   Code?: string;
@@ -535,7 +536,7 @@ export default function Store({
           String(form.Saleprice).trim() === ""
             ? null
             : parseMoney(form.Saleprice),
-        Type: String(form.Type || "").trim(),
+        Type: normalizeType(form.Type),
         Inventory:
           String(form.Inventory).trim() === ""
             ? undefined
@@ -588,7 +589,7 @@ export default function Store({
           String(row.Saleprice ?? "").trim() === ""
             ? null
             : parseMoney(row.Saleprice),
-        Type: String(row.Type ?? "").trim(),
+        Type: normalizeType(row.Type),
         Inventory: toInventory(row.Inventory ?? row.Stock ?? row.stock ?? 0),
       }));
 

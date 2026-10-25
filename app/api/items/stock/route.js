@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import Item from "@/models/Item";
+import { normalizeType } from "@/lib/helpers";
 
 export async function POST(req) {
   try {
@@ -34,7 +35,7 @@ export async function POST(req) {
           qty: 0,
           Code: String(r?.Code ?? "").trim(),
           Title: String(r?.Title ?? "").trim(),
-          Type: String(r?.Type ?? "").trim(),
+          Type: normalizeType(r?.Type),
         });
       }
 
@@ -42,7 +43,7 @@ export async function POST(req) {
       entry.qty += qty;
       if (!entry.Code) entry.Code = String(r?.Code ?? "").trim();
       if (!entry.Title) entry.Title = String(r?.Title ?? "").trim();
-      if (!entry.Type) entry.Type = String(r?.Type ?? "").trim();
+      if (!entry.Type) entry.Type = normalizeType(r?.Type);
     }
 
     const entries = [...agg.values()];

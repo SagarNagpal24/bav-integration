@@ -203,6 +203,10 @@ export default function Store({
   refreshing = false,
 }: StoreProps) {
   const [query, setQuery] = useState("");
+  const [invFilter, setInvFilter] = useState<
+    "all" | "0" | "1" | "2" | "3" | "lt"
+  >("all");
+  const [invLt, setInvLt] = useState("");
   const [stockBusy, setStockBusy] = useState(false);
   const [stockNotice, setStockNotice] = useState<string | null>(null);
 
@@ -292,7 +296,7 @@ export default function Store({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    const list = q
+    let list = q
       ? items.filter((it) => {
           const code = String(it.Code ?? "").toLowerCase();
           const mms = String(it.MMScode ?? "").toLowerCase();
@@ -308,11 +312,21 @@ export default function Store({
         })
       : [...items];
 
+    if (invFilter === "lt") {
+      const lt = Number(invLt);
+      if (invLt.trim() !== "" && Number.isFinite(lt)) {
+        list = list.filter((it) => toInventory(it.Inventory) < lt);
+      }
+    } else if (invFilter !== "all") {
+      const target = Number(invFilter);
+      list = list.filter((it) => toInventory(it.Inventory) === target);
+    }
+
     // Items still missing a sale price float to the top.
     return list.sort(
       (a, b) => (needsPrice(a) ? 0 : 1) - (needsPrice(b) ? 0 : 1)
     );
-  }, [items, query]);
+  }, [items, query, invFilter, invLt]);
 
   const missingPriceItems = useMemo(
     () => items.filter((it) => needsPrice(it)),
@@ -1068,6 +1082,68 @@ export default function Store({
         >
           Clear
         </button>
+
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            marginLeft: 8,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <b>Inventory:</b>
+          <select
+            value={invFilter}
+            onChange={(e) =>
+              setInvFilter(e.target.value as typeof invFilter)
+            }
+            style={{
+              height: 36,
+              padding: "0 8px",
+              border: "1px solid #ccc",
+              borderRadius: 6,
+            }}
+          >
+            <option value="all">All</option>
+            <option value="0">= 0</option>
+            <option value="1">= 1</option>
+            <option value="2">= 2</option>
+            <option value="3">= 3</option>
+            <option value="lt">Less than…</option>
+          </select>
+        </label>
+
+        {invFilter === "lt" && (
+          <input
+            type="number"
+            min={0}
+            value={invLt}
+            onChange={(e) => setInvLt(e.target.value)}
+            placeholder="e.g. 5"
+            style={{
+              height: 36,
+              width: 90,
+              padding: "0 10px",
+              border: "1px solid #ccc",
+              borderRadius: 6,
+            }}
+          />
+        )}
+
+        {(invFilter !== "all" || invLt.trim() !== "" || query) && (
+          <button
+            onClick={() => {
+              setQuery("");
+              setInvFilter("all");
+              setInvLt("");
+            }}
+            className="secondary"
+            title="Clear search and inventory filters"
+          >
+            Reset Filters
+          </button>
+        )}
       </div>
 
       <div style={{ margin: "10px 0", fontWeight: 600 }}>

@@ -139,6 +139,18 @@ function BillingApp({
   }, []);
 
   const addToCart = (item: Item) => {
+    const stock = Number(item.Inventory ?? 0);
+
+    if (!Number.isFinite(stock) || stock <= 0) {
+      setAlertMsg(
+        `❌ No stock available for ${item.Code || item.Title || "this item"}.`
+      );
+      setSuggestions([]);
+      setHighlightIndex(-1);
+      inputRef.current?.focus();
+      return;
+    }
+
     const existing = cart.find((c) => c.Code === item.Code);
 
     if (existing) {

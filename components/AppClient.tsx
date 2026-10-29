@@ -41,6 +41,8 @@ function BillingApp({
   const [saleCounter, setSaleCounter] = useState<"shop" | "stall">(
     user?.role === "stall" ? "stall" : "shop"
   );
+  const todayStr = new Date().toISOString().split("T")[0];
+  const [billDate, setBillDate] = useState(todayStr);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -355,8 +357,12 @@ function BillingApp({
     isSavingRef.current = true;
     setIsSaving(true);
 
-    const today = new Date().toISOString().split("T")[0];
-    const bill = { date: today, items: cart, total, counter: saleCounter };
+    const bill = {
+      date: billDate || todayStr,
+      items: cart,
+      total,
+      counter: saleCounter,
+    };
     const idempotencyKey = genIdemKey();
 
     try {
@@ -386,7 +392,16 @@ function BillingApp({
       isSavingRef.current = false;
       setIsSaving(false);
     }
-  }, [cart, total, saleCounter, stockByCode, fetchTodayTotal, fetchItems]);
+  }, [
+    cart,
+    total,
+    saleCounter,
+    billDate,
+    todayStr,
+    stockByCode,
+    fetchTodayTotal,
+    fetchItems,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -503,14 +518,26 @@ function BillingApp({
       {view === "billing" ? (
        <div style={{ width: "100%", padding: "10px 20px" }}>
           <div className="top-bar">
-            <div className="top-bar-left" style={{ flex: 1 }}>
+            <div className="top-bar-left">
               <form
                 onSubmit={handleCodeSubmit}
-                style={{ display: "flex", gap: "10px", alignItems: "center" }}
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  alignItems: "center",
+                  width: "100%",
+                }}
               >
                 <label style={{ whiteSpace: "nowrap" }}>Enter Code: </label>
 
-                <div style={{ position: "relative", flex: "0 0 60%" }}>
+                <div
+                  style={{
+                    position: "relative",
+                    flex: "1 1 280px",
+                    minWidth: 0,
+                    maxWidth: 440,
+                  }}
+                >
                   <input
                     type="text"
                     ref={inputRef}
@@ -520,7 +547,7 @@ function BillingApp({
                     placeholder="Enter item code / MMS code / Title"
                     autoComplete="off"
                     style={{
-                      width: "400px",
+                      width: "100%",
                       height: "38px",
                       lineHeight: "38px",
                       padding: "0 10px",
@@ -613,7 +640,6 @@ function BillingApp({
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 6,
-                    marginRight: 8,
                     whiteSpace: "nowrap",
                   }}
                 >
@@ -637,6 +663,34 @@ function BillingApp({
                 </label>
               )}
 
+              {user?.role === "admin" && (
+                <label
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <b>Bill Date:</b>
+                  <input
+                    type="date"
+                    value={billDate}
+                    max={todayStr}
+                    onChange={(e) => setBillDate(e.target.value)}
+                    style={{
+                      height: 36,
+                      borderRadius: 4,
+                      border: "1px solid #ccc",
+                      padding: "0 8px",
+                      fontWeight: billDate !== todayStr ? 700 : 400,
+                      color: billDate !== todayStr ? "#e65100" : "inherit",
+                    }}
+                    title="Bill date — choose a past date to record an old sale"
+                  />
+                </label>
+              )}
+
               <button
                 onClick={saveBill}
                 className="secondary"
@@ -650,13 +704,12 @@ function BillingApp({
               <button
                 onClick={requestClearCart}
                 className="danger"
-                style={{ marginLeft: "8px" }}
                 disabled={isSaving}
               >
                 Clear Cart
               </button>
 
-              <small style={{ marginLeft: "8px", color: "gray" }}>
+              <small style={{ color: "gray" }}>
                 (Ctrl+S = Save, Ctrl+D = Clear)
               </small>
             </div>

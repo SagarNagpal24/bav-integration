@@ -35,15 +35,23 @@ export default function Summary({ userRole }: SummaryProps) {
   useEffect(() => {
     const load = async () => {
       try {
-        let url = `/api/bills`;
+        const params = new URLSearchParams();
 
         if (startDate && endDate) {
-          url = `/api/bills?start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}${counterQuery}`;
+          params.set("start", startDate);
+          params.set("end", endDate);
         } else if (startDate) {
-          url = `/api/bills?date=${encodeURIComponent(startDate)}${counterQuery}`;
+          params.set("date", startDate);
         } else if (endDate) {
-          url = `/api/bills?date=${encodeURIComponent(endDate)}${counterQuery}`;
+          params.set("date", endDate);
         }
+
+        if (counter !== "all") {
+          params.set("counter", counter);
+        }
+
+        const qs = params.toString();
+        const url = `/api/bills${qs ? `?${qs}` : ""}`;
 
         const res = await fetch(url, { credentials: "include" });
         let data = await res.json();
@@ -71,8 +79,6 @@ export default function Summary({ userRole }: SummaryProps) {
 
     load();
   }, [startDate, endDate, counter]);
-
-  const counterQuery = counter !== "all" ? `&counter=${counter}` : "";
 
   const summary: Record<string, CategorySummary> = {};
   const categoryLabels: Record<string, string> = {};

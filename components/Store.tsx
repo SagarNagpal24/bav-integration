@@ -31,6 +31,8 @@ type CompareRow = {
   itemNo: string;
   name: string;
   fileQty: number;
+  expectedQty: number;
+  soldQty: number;
   storeQty: number | null;
   diff: number;
   missing: boolean;
@@ -214,6 +216,7 @@ export default function Store({
   const [compareOpen, setCompareOpen] = useState(false);
   const [compareRows, setCompareRows] = useState<CompareRow[]>([]);
   const [compareMessage, setCompareMessage] = useState<string | null>(null);
+  const [compareBasis, setCompareBasis] = useState<string>("");
   const compareInputRef = useRef<HTMLInputElement | null>(null);
 
   const emptyForm = {
@@ -266,15 +269,6 @@ export default function Store({
 
     return !(samePrice && sameInventory && sameTitle && sameType);
   };
-
-  const storeByMms = useMemo(() => {
-    const map = new Map<string, Item>();
-    for (const it of items) {
-      const key = normalizeMms(it.MMScode);
-      if (key && !map.has(key)) map.set(key, it);
-    }
-    return map;
-  }, [items]);
 
   const getCompositeKey = (code: unknown, mms: unknown) =>
     `${normalizeKeyPart(mms)}|${normalizeKeyPart(code)}`;
@@ -333,7 +327,23 @@ export default function Store({
     [items]
   );
 
-  const downloadExcel = () => {
+  const downloadExcel = async () => {
+    // Export the latest inventory so the file reflects stock already reduced
+    // by billing, even if this tab has not been refreshed.
+    let liveItems: Item[] = items;
+    try {
+      const res = await fetch(`/api/items`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const fresh = await res.json();
+        if (Array.isArray(fresh)) liveItems = fresh;
+      }
+    } catch {
+      // fall back to the items prop
+    }
+
     const headers: Array<
       "Code" | "MMScode" | "Title" | "Saleprice" | "Type" | "Inventory"
     > = ["Code", "MMScode", "Title", "Saleprice", "Type", "Inventory"];
@@ -345,7 +355,7 @@ export default function Store({
       Saleprice: number | null;
       Type: string;
       Inventory: number;
-    }> = items.map((it) => ({
+    }> = liveItems.map((it) => ({
       Code: it.Code ?? "",
       MMScode: it.MMScode ?? "",
       Title: it.Title ?? "",
@@ -819,31 +829,140 @@ export default function Store({
         blankrows: false,
       });
 
-      const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+      const norm = (v: unknown) =>
+        String(v ?? "")
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, " ");
+
+      const ITEM_HEADERS = [
+        "item number",
+        "item no",
+        "itemno",
+        "mms code",
+        "mmsscode",
+        "code",
+      ];
+      const CLOSING_HEADERS = [
+        "closing qty",
+        "closing quantity",
+        "closing stock",
+        "closing balance",
+        "balance qty",
+        "balance quantity",
+        "net qty",
+        "net quantity",
+        "available qty",
+      ];
+      const OPENING_HEADERS = [
+        "opening qty",
+        "opening quantity",
+        "opening stock",
+        "opening balance",
+      ];
 
       let headerIdx = -1;
       let colItemNo = -1;
       let colItemName = -1;
-      let colQty = -1;
+      let colClosing = -1;
+      let colOpening = -1;
 
       for (let r = 0; r < grid.length; r++) {
         const row = (grid[r] || []).map(norm);
-        const iNo = row.indexOf("item number");
-        const iQty = row.indexOf("opening qty");
-        if (iNo >= 0 && iQty >= 0) {
-          headerIdx = r;
-          colItemNo = iNo;
-          colQty = iQty;
-          colItemName = row.indexOf("item");
-          break;
-        }
+        const iNo = row.findIndex((c) => ITEM_HEADERS.includes(c));
+        if (iNo < 0) continue;
+        const iClosing = row.findIndex((c) => CLOSING_HEADERS.includes(c));
+        const iOpening = row.findIndex((c) => OPENING_HEADERS.includes(c));
+        if (iClosing < 0 && iOpening < 0) continue;
+
+        headerIdx = r;
+        colItemNo = iNo;
+        colClosing = iClosing;
+        colOpening = iOpening;
+        colItemName = row.findIndex((c) =>
+          ["item", "item name", "title"].includes(c)
+        );
+        break;
       }
 
       if (headerIdx < 0) {
         throw new Error(
-          "Could not find 'Item Number' and 'Opening Qty' columns in the file."
+          "Could not find 'Item Number' and 'Opening Qty' / 'Closing Qty' columns in the file."
         );
       }
+
+      // Compare against the latest store data. The items prop can be stale
+      // when bills were saved in another session, and inventory is reduced
+      // by billing, so always fetch a fresh copy here.
+      let liveItems: Item[] = items;
+      try {
+        const res = await fetch(`/api/items`, {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (res.ok) {
+          const fresh = await res.json();
+          if (Array.isArray(fresh)) liveItems = fresh;
+        }
+      } catch {
+        // fall back to the items prop
+      }
+
+      // When the file only has Opening Qty, reconcile it with the billing
+      // quantity already deducted from store inventory so sales are not
+      // reported as discrepancies.
+      const soldByKey = new Map<string, number>();
+      let billsLoaded = false;
+
+      if (colClosing < 0) {
+        try {
+          const res = await fetch(`/api/bills`, {
+            credentials: "include",
+            cache: "no-store",
+          });
+          if (res.ok) {
+            const bills = await res.json();
+            if (Array.isArray(bills)) {
+              billsLoaded = true;
+              for (const bill of bills) {
+                for (const it of bill?.items || []) {
+                  const qty = Math.max(0, Math.floor(Number(it?.qty) || 0));
+                  if (!qty) continue;
+                  const keys = [
+                    normalizeMms(it?.MMScode),
+                    normalizeKeyPart(it?.Code),
+                  ];
+                  for (const key of keys) {
+                    if (key) soldByKey.set(key, (soldByKey.get(key) || 0) + qty);
+                  }
+                }
+              }
+            }
+          }
+        } catch {
+          // compare with raw opening qty if bills cannot be loaded
+        }
+      }
+
+      const storeByMmsLive = new Map<string, Item>();
+      const storeByCodeLive = new Map<string, Item>();
+      for (const it of liveItems) {
+        const mms = normalizeMms(it.MMScode);
+        if (mms && !storeByMmsLive.has(mms)) storeByMmsLive.set(mms, it);
+        const code = normalizeKeyPart(it.Code);
+        if (code && !storeByCodeLive.has(code)) storeByCodeLive.set(code, it);
+      }
+
+      const useClosing = colClosing >= 0;
+      const colQty = useClosing ? colClosing : colOpening;
+
+      setCompareBasis(
+        useClosing
+          ? "Closing Qty (file) ↔ Inventory (store)"
+          : billsLoaded
+          ? "Opening Qty (file) − Billed Qty ↔ Inventory (store)"
+          : "Opening Qty (file) ↔ Inventory (store)"
+      );
 
       const rows: CompareRow[] = [];
 
@@ -862,25 +981,37 @@ export default function Store({
           )
         );
 
-        const storeItem = storeByMms.get(normalizeMms(itemNo));
+        const keyMms = normalizeMms(itemNo);
+        const keyCode = normalizeKeyPart(itemNo);
+        const storeItem =
+          storeByMmsLive.get(keyMms) || storeByCodeLive.get(keyCode);
+
+        const soldQty = useClosing
+          ? 0
+          : soldByKey.get(keyMms) ?? soldByKey.get(keyCode) ?? 0;
+        const expectedQty = useClosing ? fileQty : Math.max(0, fileQty - soldQty);
 
         if (!storeItem) {
           rows.push({
             itemNo,
             name,
             fileQty,
+            expectedQty,
+            soldQty,
             storeQty: null,
-            diff: fileQty,
+            diff: expectedQty,
             missing: true,
           });
         } else {
           const storeQty = Number(storeItem.Inventory ?? 0);
-          const diff = fileQty - storeQty;
+          const diff = expectedQty - storeQty;
           if (diff !== 0) {
             rows.push({
               itemNo,
               name: String(storeItem.Title ?? "") || name,
               fileQty,
+              expectedQty,
+              soldQty,
               storeQty,
               diff,
               missing: false,
@@ -1031,7 +1162,7 @@ export default function Store({
             className="secondary"
             style={{ backgroundColor: "#7b1fa2", color: "white" }}
             disabled={compareBusy}
-            title="Compare stock report (Item Number + Opening Qty) with store inventory"
+            title="Compare the latest stock report (Item Number + Opening/Closing Qty) with the updated store inventory after billing"
           >
             {compareBusy ? "Comparing…" : "Compare File"}
           </button>
@@ -1668,7 +1799,7 @@ export default function Store({
 
             <p style={{ ...confirmText, marginTop: 12 }}>
               Compared <strong>Item Number (file) ↔ MMS Code (store)</strong> and
-              <strong> Opening Qty (file) ↔ Inventory (store)</strong>.
+              <strong> {compareBasis || "Opening Qty (file) ↔ Inventory (store)"}</strong>.
               {compareRows.length > 0 && (
                 <>
                   <br />
@@ -1694,6 +1825,8 @@ export default function Store({
                       <th style={th2}>Item No</th>
                       <th style={th2}>Name</th>
                       <th style={th2}>File Qty</th>
+                      <th style={th2}>Billed</th>
+                      <th style={th2}>Expected</th>
                       <th style={th2}>Store Qty</th>
                       <th style={th2}>Diff</th>
                       <th style={th2}>Status</th>
@@ -1705,6 +1838,10 @@ export default function Store({
                         <td style={tdMono}>{r.itemNo}</td>
                         <td style={td}>{r.name}</td>
                         <td style={{ ...td, textAlign: "right" }}>{r.fileQty}</td>
+                        <td style={{ ...td, textAlign: "right" }}>{r.soldQty}</td>
+                        <td style={{ ...td, textAlign: "right" }}>
+                          {r.expectedQty}
+                        </td>
                         <td style={{ ...td, textAlign: "right" }}>
                           {r.storeQty ?? "—"}
                         </td>

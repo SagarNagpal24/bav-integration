@@ -38,6 +38,14 @@ type CompareRow = {
   missing: boolean;
 };
 
+type BarcodeRow = {
+  MMScode?: string;
+  Code?: string;
+  Title?: string;
+  Saleprice?: number | string | null;
+  quantity: number;
+};
+
 type StoreProps = {
   items?: Item[];
   onRefresh?: () => void;
@@ -219,6 +227,11 @@ export default function Store({
   const [compareBasis, setCompareBasis] = useState<string>("");
   const compareInputRef = useRef<HTMLInputElement | null>(null);
 
+  const [barcodeOpen, setBarcodeOpen] = useState(false);
+  const [barcodeQuery, setBarcodeQuery] = useState("");
+  const [barcodeRows, setBarcodeRows] = useState<BarcodeRow[]>([]);
+  const [barcodeError, setBarcodeError] = useState<string | null>(null);
+
   const emptyForm = {
     Code: "",
     MMScode: "",
@@ -326,6 +339,129 @@ export default function Store({
     () => items.filter((it) => needsPrice(it)),
     [items]
   );
+
+  const barcodeMatches = useMemo(() => {
+    const q = barcodeQuery.trim().toLowerCase();
+    if (!q) return [];
+    return items
+      .filter((it) => {
+        const mms = String(it.MMScode ?? "").toLowerCase();
+        const code = String(it.Code ?? "").toLowerCase();
+        return mms.includes(q) || code.includes(q);
+      })
+      .slice(0, 25);
+  }, [items, barcodeQuery]);
+
+  const barcodeKey = (it: { MMScode?: string; Code?: string }) =>
+    normalizeMms(it.MMScode) || normalizeKeyPart(it.Code);
+
+  const addBarcodeItem = (it: Item) => {
+    const key = barcodeKey(it);
+    if (!key) return;
+    if (barcodeRows.some((r) => barcodeKey(r) === key)) {
+      setBarcodeError("This item is already in the barcode file.");
+      return;
+    }
+    setBarcodeRows((prev) => [
+      ...prev,
+      {
+        MMScode: it.MMScode ?? "",
+        Code: it.Code ?? "",
+        Title: it.Title ?? "",
+        Saleprice: it.Saleprice ?? null,
+        quantity: 1,
+      },
+    ]);
+    setBarcodeQuery("");
+    setBarcodeError(null);
+  };
+
+  const addBarcodeFromQuery = () => {
+    const q = barcodeQuery.trim().toLowerCase();
+    if (!q) {
+      setBarcodeError("Enter an MMS code to search.");
+      return;
+    }
+    const exact = items.find(
+      (it) =>
+        String(it.MMScode ?? "").trim().toLowerCase() === q ||
+        String(it.Code ?? "").trim().toLowerCase() === q
+    );
+    if (exact) {
+      addBarcodeItem(exact);
+      return;
+    }
+    if (barcodeMatches.length === 1) {
+      addBarcodeItem(barcodeMatches[0]);
+      return;
+    }
+    setBarcodeError(
+      barcodeMatches.length === 0
+        ? "No item matches that MMS code."
+        : "Multiple items match — pick one from the list below."
+    );
+  };
+
+  const removeBarcodeItem = (idx: number) => {
+    setBarcodeRows((prev) => prev.filter((_, i) => i !== idx));
+    setBarcodeError(null);
+  };
+
+  const updateBarcodeQty = (idx: number, value: string) => {
+    const qty = Math.max(1, Math.floor(Number(value) || 1));
+    setBarcodeRows((prev) =>
+      prev.map((r, i) => (i === idx ? { ...r, quantity: qty } : r))
+    );
+  };
+
+  const openBarcode = () => {
+    setBarcodeError(null);
+    setBarcodeOpen(true);
+  };
+
+  const closeBarcode = () => {
+    setBarcodeOpen(false);
+    setBarcodeQuery("");
+    setBarcodeRows([]);
+    setBarcodeError(null);
+  };
+
+  const exportBarcodeCsv = () => {
+    if (barcodeRows.length === 0) {
+      setBarcodeError("Add at least one item before exporting.");
+      return;
+    }
+
+    const headers = ["MMS code", "Code", "Title", "Sale price", "Quantity"];
+    const data = barcodeRows.map((r) => [
+      r.MMScode ?? "",
+      r.Code ?? "",
+      r.Title ?? "",
+      parseMoney(r.Saleprice) ?? "",
+      r.quantity,
+    ]);
+
+    const escape = (cell: unknown) => {
+      const s = String(cell ?? "");
+      return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    const csv = [headers, ...data]
+      .map((row) => row.map(escape).join(","))
+      .join("\r\n");
+
+    const blob = new Blob(["\uFEFF" + csv], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `barcode-file-${new Date().toISOString().split("T")[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const downloadExcel = async () => {
     // Export the latest inventory so the file reflects stock already reduced
@@ -1076,11 +1212,12 @@ export default function Store({
         if (confirmOpen) closeDeleteConfirm();
         if (importConfirmOpen) closeImportConfirm();
         if (compareOpen) setCompareOpen(false);
+        if (barcodeOpen) closeBarcode();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, confirmOpen, importConfirmOpen, compareOpen, busy, importBusy]);
+  }, [isOpen, confirmOpen, importConfirmOpen, compareOpen, barcodeOpen, busy, importBusy]);
 
   return (
     <div className="container">
@@ -1273,6 +1410,21 @@ export default function Store({
             title="Clear search and inventory filters"
           >
             Reset Filters
+          </button>
+        )}
+
+        {!readOnly && (
+          <button
+            onClick={openBarcode}
+            className="secondary"
+            style={{
+              backgroundColor: "#00695c",
+              color: "white",
+              marginLeft: "auto",
+            }}
+            title="Search items by MMS code and export a barcode CSV for printing"
+          >
+            Barcode file
           </button>
         )}
       </div>
@@ -1778,6 +1930,241 @@ export default function Store({
                   ? "Saving..."
                   : `Apply (${newImportItems.length + importUpdateItems.length})`}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {barcodeOpen && (
+        <div style={backdropStyle} onMouseDown={closeBarcode}>
+          <div
+            style={{ ...confirmModalStyle, width: "min(820px, 100%)" }}
+            onMouseDown={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <h4 style={{ margin: 0 }}>Barcode File</h4>
+
+            <p style={{ ...confirmText, marginTop: 8 }}>
+              Search items by <strong>MMS code</strong> (or Code), add them to the
+              list below, set how many barcode labels to print, then export a
+              CSV for barcode printing.
+            </p>
+
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                marginTop: 12,
+                alignItems: "center",
+              }}
+            >
+              <input
+                type="text"
+                autoFocus
+                value={barcodeQuery}
+                onChange={(e) => {
+                  setBarcodeQuery(e.target.value);
+                  setBarcodeError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addBarcodeFromQuery();
+                  }
+                }}
+                placeholder="Search MMS code…"
+                style={{
+                  flex: 1,
+                  height: 36,
+                  padding: "0 10px",
+                  border: "1px solid #ccc",
+                  borderRadius: 6,
+                }}
+              />
+              <button
+                type="button"
+                className="primary"
+                onClick={addBarcodeFromQuery}
+                style={{ backgroundColor: "#00695c", color: "white" }}
+              >
+                Add
+              </button>
+            </div>
+
+            {barcodeQuery.trim() !== "" && barcodeMatches.length > 0 && (
+              <div
+                style={{
+                  marginTop: 8,
+                  maxHeight: 180,
+                  overflow: "auto",
+                  border: "1px solid #eee",
+                  borderRadius: 8,
+                }}
+              >
+                {barcodeMatches.map((it, idx) => (
+                  <button
+                    key={`${it.MMScode}-${it.Code}-${idx}`}
+                    type="button"
+                    onClick={() => addBarcodeItem(it)}
+                    style={{
+                      display: "flex",
+                      width: "100%",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      padding: "8px 10px",
+                      border: "none",
+                      borderBottom: "1px solid #f1f1f1",
+                      background: "white",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: 13,
+                    }}
+                  >
+                    <span>
+                      <strong>{it.MMScode || "-"}</strong> | {it.Code || "-"}
+                    </span>
+                    <span
+                      style={{
+                        color: "#555",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        maxWidth: 360,
+                      }}
+                    >
+                      {it.Title || "-"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {barcodeQuery.trim() !== "" && barcodeMatches.length === 0 && (
+              <p style={{ ...confirmText, marginTop: 8, color: "#b00020" }}>
+                No item matches that MMS code.
+              </p>
+            )}
+
+            {barcodeError && (
+              <p style={{ ...confirmText, marginTop: 8, color: "#b00020" }}>
+                {barcodeError}
+              </p>
+            )}
+
+            {barcodeRows.length > 0 && (
+              <div
+                style={{
+                  marginTop: 12,
+                  maxHeight: 320,
+                  overflow: "auto",
+                  border: "1px solid #eee",
+                  borderRadius: 8,
+                }}
+              >
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={th2}>MMS code</th>
+                      <th style={th2}>Code</th>
+                      <th style={th2}>Title</th>
+                      <th style={th2}>Sale price</th>
+                      <th style={th2}>Quantity</th>
+                      <th style={th2}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {barcodeRows.map((it, idx) => (
+                      <tr key={`${it.MMScode}-${it.Code}-${idx}`}>
+                        <td style={tdMono}>{it.MMScode || "-"}</td>
+                        <td style={td}>{it.Code || "-"}</td>
+                        <td style={td}>{it.Title || "-"}</td>
+                        <td style={{ ...td, textAlign: "right" }}>
+                          {parseMoney(it.Saleprice) ?? "-"}
+                        </td>
+                        <td style={{ ...td, textAlign: "right" }}>
+                          <input
+                            type="number"
+                            min={1}
+                            value={it.quantity}
+                            onChange={(e) =>
+                              updateBarcodeQty(idx, e.target.value)
+                            }
+                            style={{
+                              width: 70,
+                              height: 28,
+                              padding: "0 6px",
+                              border: "1px solid #ccc",
+                              borderRadius: 6,
+                              textAlign: "right",
+                            }}
+                          />
+                        </td>
+                        <td style={{ ...td, textAlign: "center" }}>
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => removeBarcodeItem(idx)}
+                            style={{
+                              padding: "2px 8px",
+                              fontSize: 12,
+                              backgroundColor: "#fbe9e7",
+                              color: "#b00020",
+                              border: "1px solid #f5c6c0",
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+                marginTop: 14,
+              }}
+            >
+              <span style={{ fontSize: 13, color: "#555" }}>
+                {barcodeRows.length} item(s) added
+              </span>
+              <div style={{ display: "flex", gap: 8 }}>
+                {barcodeRows.length > 0 && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setBarcodeRows([]);
+                      setBarcodeError(null);
+                    }}
+                  >
+                    Clear
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={closeBarcode}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={exportBarcodeCsv}
+                  disabled={barcodeRows.length === 0}
+                  style={{ backgroundColor: "#00695c", color: "white" }}
+                >
+                  Export CSV
+                </button>
+              </div>
             </div>
           </div>
         </div>

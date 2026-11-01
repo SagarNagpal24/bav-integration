@@ -1800,6 +1800,11 @@ export default function Store({
             <p style={{ ...confirmText, marginTop: 12 }}>
               Compared <strong>Item Number (file) ↔ MMS Code (store)</strong> and
               <strong> {compareBasis || "Opening Qty (file) ↔ Inventory (store)"}</strong>.
+              <br />
+              <span style={{ fontSize: 12, color: "#555" }}>
+                Blue columns come from the uploaded file · Green column is the
+                current store inventory.
+              </span>
               {compareRows.length > 0 && (
                 <>
                   <br />
@@ -1824,10 +1829,30 @@ export default function Store({
                     <tr>
                       <th style={th2}>Item No</th>
                       <th style={th2}>Name</th>
-                      <th style={th2}>File Qty</th>
-                      <th style={th2}>Billed</th>
-                      <th style={th2}>Expected</th>
-                      <th style={th2}>Store Qty</th>
+                      <th
+                        style={{ ...th2, color: "#1d4ed8" }}
+                        title="Quantity from the uploaded file"
+                      >
+                        File Qty
+                      </th>
+                      <th
+                        style={{ ...th2, color: "#1d4ed8" }}
+                        title="Quantity sold through billing"
+                      >
+                        Billed Qty
+                      </th>
+                      <th
+                        style={{ ...th2, color: "#1d4ed8" }}
+                        title="File qty adjusted for billed qty"
+                      >
+                        Expected Qty
+                      </th>
+                      <th
+                        style={{ ...th2, color: "#15803d" }}
+                        title="Current inventory in the store"
+                      >
+                        Store Qty(POS)
+                      </th>
                       <th style={th2}>Diff</th>
                       <th style={th2}>Status</th>
                     </tr>
@@ -1912,6 +1937,7 @@ const th2: React.CSSProperties = {
   position: "sticky",
   top: 0,
   background: "white",
+  color: "#34495e",
 };
 
 const td: React.CSSProperties = {
